@@ -519,7 +519,8 @@ async function loadRelated(head) {
   const d = el("div", null, "Loading related videos…");
   d.id = "nores"; list.appendChild(d);
   try {
-    const r = await fetch("/api/related?channel=" + encodeURIComponent(head.channel || ""));
+    const r = await fetch("/api/related?videoId=" + encodeURIComponent(head.videoId) +
+                          "&channel=" + encodeURIComponent(head.channel || ""));
     const data = await r.json();
     list.innerHTML = "";
     if (plist) plist.innerHTML = "";

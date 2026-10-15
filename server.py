@@ -232,6 +232,77 @@ def handle_message(c, msg):
 
 # ------------------------------------------------------------- youtube api
 
+def youtube_api(path, params):
+    """Call a YouTube Data API endpoint. The list endpoints used here cost
+    ~1 quota unit each (a search costs 100). Returns (data, error)."""
+    key = load_key()
+    if not key:
+        return None, "no_key"
+    params = dict(params)
+    params["key"] = key
+    url = ("https://www.googleapis.com/youtube/v3/" + path + "?"
+           + urllib.parse.urlencode(params))
+    try:
+        with urllib.request.urlopen(url, timeout=12) as r:
+            return json.load(r), None
+    except Exception as e:  # bad key, quota out, rate-limited, offline...
+        return None, "youtube_error: %s" % e
+
+
+def channel_uploads(video_id, max_results=12):
+    """Related videos = latest uploads from the same channel as video_id.
+    Costs ~3 quota units total instead of 100 for a search."""
+    # 1) video -> channelId (1 unit)
+    data, err = youtube_api("videos",
+                            {"part": "snippet", "id": video_id,
+                             "maxResults": 1})
+    if err:
+        return [], err
+    items = data.get("items") or []
+    if not items:
+        return [], None
+    snippet = items[0].get("snippet") or {}
+    channel_id = snippet.get("channelId")
+    channel_title = snippet.get("channelTitle", "")
+    if not channel_id:
+        return [], None
+    # 2) channel -> uploads playlist id (1 unit)
+    data, err = youtube_api("channels",
+                            {"part": "contentDetails", "id": channel_id,
+                             "maxResults": 1})
+    if err:
+        return [], err
+    items = data.get("items") or []
+    if not items:
+        return [], None
+    uploads = ((items[0].get("contentDetails") or {})
+               .get("relatedPlaylists") or {}).get("uploads")
+    if not uploads:
+        return [], None
+    # 3) uploads playlist -> videos (1 unit)
+    data, err = youtube_api("playlistItems",
+                            {"part": "snippet", "playlistId": uploads,
+                             "maxResults": max_results})
+    if err:
+        return [], err
+    out = []
+    for it in data.get("items") or []:
+        sn = it.get("snippet") or {}
+        vid = (sn.get("resourceId") or {}).get("videoId")
+        if not vid or vid == video_id:
+            continue
+        thumbs = sn.get("thumbnails") or {}
+        thumb = ((thumbs.get("medium") or thumbs.get("default") or {})
+                 .get("url", ""))
+        out.append({
+            "videoId": vid,
+            "title": sn.get("title", ""),
+            "channel": sn.get("channelTitle", channel_title),
+            "thumb": thumb,
+        })
+    return out, None
+
+
 def youtube_search(q, max_results=15):
     """Search YouTube for q. Returns (items, error)."""
     key = load_key()
@@ -308,14 +379,20 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        # --- related videos: more karaoke from the same channel ---
-        # (YouTube removed relatedToVideoId from the Data API, so we use a
-        # channel-based search as the related-videos source.)
+        # --- related videos: latest uploads from the same channel ---
+        # (YouTube removed relatedToVideoId from the Data API. We resolve the
+        # video's channel via cheap list endpoints (~3 quota units total)
+        # instead of a search (100 units), which also avoids rate-limiting.)
         if parsed.path == "/api/related":
             qs = urllib.parse.parse_qs(parsed.query)
+            video_id = qs.get("videoId", [""])[0].strip()
             channel = qs.get("channel", [""])[0].strip()
-            items, err = youtube_search(
-                (channel + " karaoke") if channel else "", max_results=12)
+            if video_id:
+                items, err = channel_uploads(video_id)
+            else:
+                # legacy fallback for callers without a videoId
+                items, err = youtube_search(
+                    (channel + " karaoke") if channel else "", max_results=12)
             body = json.dumps({"items": items, "error": err}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
