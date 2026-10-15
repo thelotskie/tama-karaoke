@@ -565,6 +565,16 @@ function el(tag, cls, text) {
 }
 /* one video row with a Reserve button — shared by search, recent, related */
 function reserveVideo(v, btn, auto, drain) {
+  /* don't re-reserve what's already queued (incl. the playing song) */
+  if (!auto && queue.some(q => q.videoId === v.videoId)) {
+    if (btn) {
+      const orig = btn.textContent;
+      btn.textContent = "Already in queue";
+      btn.disabled = true;
+      setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1500);
+    }
+    return;
+  }
   if (ws && ws.readyState === 1)
     ws.send(JSON.stringify({ t: "reserve", videoId: v.videoId, title: v.title,
       channel: v.channel, thumb: v.thumb, by: "screen",
@@ -855,9 +865,9 @@ $("skipbtn").addEventListener("click", () => {
   if (ws && ws.readyState === 1)
     ws.send(JSON.stringify({ t: "control", action: "next" }));
 });
-/* Clear queue: empties everything, stops playback, turns autoplay off.
-   Exposed globally (and via inline onclick) so it works even if a
-   listener fails to attach; gives visual feedback on tap. */
+/* Clear queue: removes everything after the playing song (keeps playing),
+   turns autoplay off. Exposed globally (and via inline onclick) so it
+   works even if a listener fails to attach; gives visual feedback on tap. */
 window.clearQueue = function clearQueue() {
   const btn = $("clearbtn");
   if (btn) btn.textContent = "Clearing…";

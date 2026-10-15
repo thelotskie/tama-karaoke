@@ -29,7 +29,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 26
+CODE_VERSION = 27
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -193,13 +193,16 @@ def handle_message(c, msg):
     elif t == "reserve":
         with state_lock:
             vid = msg.get("videoId", "")
-            ok = True
-            if msg.get("auto"):
+            # no duplicates: skip if already in the queue (incl. playing song)
+            if any(i.get("videoId") == vid for i in queue):
+                ok = False
+            elif msg.get("auto"):
                 # autoplay reserve: honored only for the current drain while
                 # the queue is still empty — one autoplay per drain; stale
                 # clients (no drain) and racers are ignored
-                ok = (msg.get("drain") == drain_seq and not queue
-                      and not any(i.get("videoId") == vid for i in queue))
+                ok = (msg.get("drain") == drain_seq and not queue)
+            else:
+                ok = True
             if ok:
                 queue_seq += 1
                 queue.append({
@@ -234,10 +237,11 @@ def handle_message(c, msg):
         broadcast_queue()
 
     elif t == "clear":
-        # empty the whole queue (stops the current song too); also turns
-        # autoplay off so it doesn't instantly refill
+        # clear the queue but keep the currently playing song (queue[0]);
+        # also turns autoplay off so it doesn't instantly refill
         with state_lock:
-            queue.clear()
+            if queue:
+                del queue[1:]
             autoplay_on = False
         broadcast_queue()
 
