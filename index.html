@@ -608,7 +608,8 @@ async function loadRelated(head) {
   try {
     const r = await fetch("/api/related?videoId=" + encodeURIComponent(head.videoId) +
                           "&channel=" + encodeURIComponent(head.channel || "") +
-                          "&title=" + encodeURIComponent(head.title || ""));
+                          "&title=" + encodeURIComponent(head.title || "") +
+                          "&smode=" + encodeURIComponent(searchMode()));
     const data = await r.json();
     list.innerHTML = "";
     if (plist) plist.innerHTML = "";

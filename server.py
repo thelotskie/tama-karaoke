@@ -29,7 +29,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 10
+CODE_VERSION = 11
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -564,15 +564,22 @@ class Handler(BaseHTTPRequestHandler):
             video_id = qs.get("videoId", [""])[0].strip()
             channel = qs.get("channel", [""])[0].strip()
             title = qs.get("title", [""])[0].strip()
+            smode = qs.get("smode", ["karaoke"])[0].strip()
+            # related follows the search mode: normal -> plain videos,
+            # karaoke -> karaoke versions
+            k_suffix = "" if smode == "normal" else " karaoke"
             items, err = [], None
             if title:
-                # primary: artist-based "<artist> karaoke" via the free no-key
-                # scrape (0 quota) — different songs by the same artist,
-                # YouTube-radio style, instead of 10 copies of the same song
+                # primary: artist-based "<artist>[ karaoke]" via the free
+                # no-key scrape (0 quota) — different songs by the same
+                # artist, YouTube-radio style, not 10 copies of one song
                 artist = _artist_from_title(title)
-                song_q = (title if "karaoke" in title.lower()
-                          else title + " karaoke")
-                queries = ([artist + " karaoke"] if artist else []) + [song_q]
+                if k_suffix and "karaoke" not in title.lower():
+                    song_q = title + k_suffix
+                else:
+                    song_q = title
+                queries = ([(artist + k_suffix).strip()] if artist else [])
+                queries.append(song_q)
                 items, err, used_artist = [], None, False
                 for i, qq in enumerate(queries):
                     items, err = _scrape_search(qq, max_results=12)
@@ -592,14 +599,15 @@ class Handler(BaseHTTPRequestHandler):
                 # fallback: latest uploads from the same channel (~3 units)
                 items, err = channel_uploads(video_id)
                 if _key_limited(err):
-                    # key can't serve: no-key scrape of the channel's karaoke
+                    # key can't serve: no-key scrape of the channel
                     items, err = _scrape_search(
-                        (channel + " karaoke") if channel else "",
+                        (channel + k_suffix).strip() if channel else "",
                         max_results=12)
             if not items and not video_id and not title:
                 # legacy fallback for callers without a videoId
                 items, err = youtube_search(
-                    (channel + " karaoke") if channel else "", max_results=12)
+                    (channel + k_suffix).strip() if channel else "",
+                    max_results=12)
             body = json.dumps({"items": items, "error": err}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
