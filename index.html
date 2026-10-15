@@ -140,6 +140,17 @@
     border-bottom: 1px solid #1a2440; }
   .card img { width: 100%; height: auto; aspect-ratio: 16 / 9;
     object-fit: cover; border-radius: 8px; background: #111a33; }
+  /* thumbnail is the Play now button; reserve is a small icon top-right (v37) */
+  .card .thumbwrap { position: relative; cursor: pointer; }
+  .card .thumbwrap img { display: block; }
+  .card .iconbtn { position: absolute; top: 6px; right: 6px;
+    width: 32px; height: 32px; border-radius: 50%; padding: 0;
+    background: rgba(6,214,160,.94); color: #03231a;
+    border: none; font-size: 20px; font-weight: 800; line-height: 1;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .card .iconbtn.done { background: rgba(255,209,102,.95); }
+  .card .iconbtn.dup { background: rgba(239,71,111,.95); }
+  .card .iconbtn:disabled { cursor: default; }
   .card .meta { margin: 8px 0; min-width: 0; }
   .card .t { font-size: 15px; font-weight: 600; }
   .card .c { font-size: 13px; color: #8b96bd; margin-top: 4px; }
@@ -578,10 +589,15 @@ function reserveVideo(v, btn, auto, drain) {
   /* don't re-reserve what's already queued (incl. the playing song) */
   if (!auto && queue.some(q => q.videoId === v.videoId)) {
     if (btn) {
-      const orig = btn.textContent;
-      btn.textContent = "Already in queue";
-      btn.disabled = true;
-      setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1500);
+      if (btn.classList.contains("iconbtn")) {
+        btn.classList.add("dup");
+        setTimeout(() => btn.classList.remove("dup"), 1500);
+      } else {
+        const orig = btn.textContent;
+        btn.textContent = "Already in queue";
+        btn.disabled = true;
+        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1500);
+      }
     }
     return;
   }
@@ -589,21 +605,27 @@ function reserveVideo(v, btn, auto, drain) {
     ws.send(JSON.stringify({ t: "reserve", videoId: v.videoId, title: v.title,
       channel: v.channel, thumb: v.thumb, by: "screen",
       auto: !!auto, drain: drain }));
-  if (btn) { btn.textContent = "Reserved ✓"; btn.disabled = true; }
+  if (btn) {
+    if (btn.classList.contains("iconbtn")) {
+      btn.textContent = "✓"; btn.disabled = true; btn.classList.add("done");
+    } else { btn.textContent = "Reserved ✓"; btn.disabled = true; }
+  }
 }
 function videoCard(it) {
   const card = el("div", "card");
+  const thumbwrap = el("div", "thumbwrap");
   const img = el("img"); img.src = it.thumb; img.alt = "";
+  thumbwrap.appendChild(img);
+  thumbwrap.title = "Play now";
+  thumbwrap.addEventListener("click", () => playNowVideo(it, null));
+  const rsv = el("button", "iconbtn", "+");
+  rsv.title = "Reserve";
+  rsv.addEventListener("click", (e) => { e.stopPropagation(); reserveVideo(it, rsv); });
+  thumbwrap.appendChild(rsv);
   const meta = el("div", "meta");
   meta.appendChild(el("div", "t", it.title));
   meta.appendChild(el("div", "c", it.channel || ""));
-  const actions = el("div", "actions");
-  const play = el("button", "playnow", "▶ Play now");
-  play.addEventListener("click", () => playNowVideo(it, play));
-  const btn = el("button", "reserve", "Reserve");
-  btn.addEventListener("click", () => reserveVideo(it, btn));
-  actions.appendChild(play); actions.appendChild(btn);
-  card.appendChild(img); card.appendChild(meta); card.appendChild(actions);
+  card.appendChild(thumbwrap); card.appendChild(meta);
   return card;
 }
 /* play immediately: jumps to the front of the queue */
