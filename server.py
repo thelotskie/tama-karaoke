@@ -29,7 +29,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 43
+CODE_VERSION = 44
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -709,21 +709,27 @@ class Handler(BaseHTTPRequestHandler):
                     (channel + k_suffix).strip() if channel else "",
                     max_results=12)
             if more and title:
-                # infinite scroll: try a fresh query variation for more videos
+                # infinite scroll: cycle through query variations for more
+                # videos — wraps around so it keeps going; exclude filters
+                # already-shown so we never repeat
                 artist = _artist_from_title(title)
-                variants = [
-                    (artist + " live" + k_suffix).strip(),
-                    (artist + " acoustic" + k_suffix).strip(),
-                    (artist + " greatest hits" + k_suffix).strip(),
-                    (artist + " playlist" + k_suffix).strip(),
-                ] if artist else []
+                base_variants = [
+                    " live", " acoustic", " greatest hits", " playlist",
+                    " unplugged", " cover", " official video", " top songs",
+                    " best of", " live performance",
+                ]
+                variants = [(artist + v + k_suffix).strip()
+                            for v in base_variants] if artist else []
                 try:
                     n = int(more)
                 except ValueError:
                     n = 1
-                if 1 <= n <= len(variants):
-                    vitems, verr = _scrape_search(variants[n - 1],
-                                                 max_results=12)
+                if n >= 1 and variants:
+                    # cycle: variation index wraps, offset grows for deeper
+                    # pages of the same variation
+                    v_idx = (n - 1) % len(variants)
+                    vitems, verr = _scrape_search(variants[v_idx],
+                                                 max_results=30)
                     if vitems:
                         items, err = vitems, verr
             # drop already-shown videos (infinite scroll)
