@@ -185,6 +185,21 @@ def handle_message(c, msg):
             })
         broadcast_queue()
 
+    elif t == "playnow":
+        # Play immediately: insert at the front of the queue. The song that
+        # was playing shifts to second place and resumes afterwards.
+        with state_lock:
+            queue_seq += 1
+            queue.insert(0, {
+                "id": "q%d" % queue_seq,
+                "videoId": msg.get("videoId", ""),
+                "title": msg.get("title", "Unknown"),
+                "channel": msg.get("channel", ""),
+                "thumb": msg.get("thumb", ""),
+                "by": c.get("name") or msg.get("by") or "screen",
+            })
+        broadcast_queue()
+
     elif t == "cancel":
         rid = msg.get("id")
         with state_lock:

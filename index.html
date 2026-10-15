@@ -63,6 +63,10 @@
   .card .c { font-size: 13px; color: #8b96bd; margin-top: 4px; }
   .reserve { background: #06d6a0; color: #03231a; border: none; border-radius: 10px;
     padding: 10px 18px; font-size: 14px; font-weight: 700; cursor: pointer; flex-shrink: 0; }
+  .card .actions { display: flex; gap: 8px; flex-shrink: 0; }
+  .playnow { background: #ffd166; color: #201500; border: none; border-radius: 10px;
+    padding: 10px 18px; font-size: 14px; font-weight: 700; cursor: pointer; flex-shrink: 0; }
+  .playnow:disabled, .reserve:disabled { opacity: .55; cursor: default; }
   .notice { background: #3a2b00; border: 1px solid #8a6d1c; color: #ffd166;
     border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; font-size: 14px; }
   .sectitle { font-size: 13px; font-weight: 800; letter-spacing: 1px;
@@ -367,10 +371,21 @@ function videoCard(it) {
   const meta = el("div", "meta");
   meta.appendChild(el("div", "t", it.title));
   meta.appendChild(el("div", "c", it.channel || ""));
+  const actions = el("div", "actions");
+  const play = el("button", "playnow", "▶ Play now");
+  play.addEventListener("click", () => playNowVideo(it, play));
   const btn = el("button", "reserve", "Reserve");
   btn.addEventListener("click", () => reserveVideo(it, btn));
-  card.appendChild(img); card.appendChild(meta); card.appendChild(btn);
+  actions.appendChild(play); actions.appendChild(btn);
+  card.appendChild(img); card.appendChild(meta); card.appendChild(actions);
   return card;
+}
+/* play immediately: jumps to the front of the queue */
+function playNowVideo(v, btn) {
+  if (ws && ws.readyState === 1)
+    ws.send(JSON.stringify({ t: "playnow", videoId: v.videoId, title: v.title,
+      channel: v.channel, thumb: v.thumb, by: "screen" }));
+  if (btn) { btn.textContent = "Playing ▶"; btn.disabled = true; }
 }
 /* ---------- recently played (this screen, kept locally) ---------- */
 let recentPlayed = [];
