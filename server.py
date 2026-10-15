@@ -24,6 +24,10 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.environ.get("PORT", "8765"))
+
+# Karaoke-only search: when True, every query becomes "<query> karaoke".
+# Turned OFF on Othelo's word 2026-10-14 — set back to True when he says so.
+KARAOKE_ONLY = False
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
@@ -230,7 +234,7 @@ def youtube_search(q):
         "videoEmbeddable": "true",
         "maxResults": 15,
         "order": "relevance",
-        "q": q + " karaoke",
+        "q": (q + " karaoke") if KARAOKE_ONLY else q,
         "key": key,
     })
     url = "https://www.googleapis.com/youtube/v3/search?" + params
