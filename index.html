@@ -289,7 +289,7 @@ function onQueue(items) {
     try { playVideo(head); } catch (e) {}
     showBg(false);
     pushRecent(head);
-    loadRelated(head.videoId);
+    loadRelated(head);
   }
 }
 
@@ -401,17 +401,17 @@ function renderRecent() {
   recentPlayed.forEach(it => list.appendChild(videoCard(it)));
 }
 /* ---------- related videos (for the song now playing) ---------- */
-async function loadRelated(videoId) {
+async function loadRelated(head) {
   const list = $("relatedList");
   list.innerHTML = "";
-  if (!videoId) return;
+  if (!head || !head.videoId) return;
   const d = el("div", null, "Loading related videos…");
   d.id = "nores"; list.appendChild(d);
   try {
-    const r = await fetch("/api/search?relatedTo=" + encodeURIComponent(videoId));
+    const r = await fetch("/api/related?channel=" + encodeURIComponent(head.channel || ""));
     const data = await r.json();
     list.innerHTML = "";
-    const items = (data.items || []).filter(it => it.videoId !== videoId).slice(0, 10);
+    const items = (data.items || []).filter(it => it.videoId !== head.videoId).slice(0, 10);
     if (!items.length) {
       const e2 = el("div", null, "No related videos found.");
       e2.id = "nores"; list.appendChild(e2); return;
