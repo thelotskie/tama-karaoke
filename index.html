@@ -149,7 +149,6 @@
     border: none; font-size: 20px; font-weight: 800; line-height: 1;
     cursor: pointer; display: flex; align-items: center; justify-content: center; }
   .card .iconbtn.done { background: rgba(255,209,102,.95); }
-  .card .iconbtn.dup { background: rgba(239,71,111,.95); }
   .card .iconbtn:disabled { cursor: default; }
   .card .meta { margin: 8px 0; min-width: 0; }
   .card .t { font-size: 15px; font-weight: 600; }
@@ -427,6 +426,7 @@ function onQueue(items, autoplay, drain) {
   }
   if (typeof drain === "number") currentDrain = drain;
   renderQueue();
+  refreshRsvIcons(); // keep card reserve icons in sync with the queue
   const head = items[0];
   if (!head) {
     if (currentId !== null) {
@@ -590,19 +590,31 @@ function el(tag, cls, text) {
   return e;
 }
 /* one video row with a Reserve button — shared by search, recent, related */
+/* reserve icon state: "+" = tap to reserve, "✓" = tap again to cancel */
+function setRsvIcon(btn, reserved) {
+  if (!btn) return;
+  btn.textContent = reserved ? "✓" : "+";
+  btn.classList.toggle("done", reserved);
+  btn.title = reserved ? "Cancel reservation" : "Reserve";
+}
+function refreshRsvIcons() {
+  document.querySelectorAll(".iconbtn[data-videoid]").forEach(b => {
+    setRsvIcon(b, queue.some(q => q.videoId === b.dataset.videoid));
+  });
+}
 function reserveVideo(v, btn, auto, drain) {
-  /* don't re-reserve what's already queued (incl. the playing song) */
+  /* tapping the icon of an already-queued video cancels it (toggle) */
   if (!auto && queue.some(q => q.videoId === v.videoId)) {
-    if (btn) {
-      if (btn.classList.contains("iconbtn")) {
-        btn.classList.add("dup");
-        setTimeout(() => btn.classList.remove("dup"), 1500);
-      } else {
-        const orig = btn.textContent;
-        btn.textContent = "Already in queue";
-        btn.disabled = true;
-        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1500);
-      }
+    if (btn && btn.classList.contains("iconbtn")) {
+      const qitem = queue.find(q => q.videoId === v.videoId);
+      if (qitem && ws && ws.readyState === 1)
+        ws.send(JSON.stringify({ t: "cancel", id: qitem.id }));
+      setRsvIcon(btn, false); // optimistic; the queue broadcast confirms
+    } else if (btn) {
+      const orig = btn.textContent;
+      btn.textContent = "Already in queue";
+      btn.disabled = true;
+      setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1500);
     }
     return;
   }
@@ -611,9 +623,8 @@ function reserveVideo(v, btn, auto, drain) {
       channel: v.channel, thumb: v.thumb, by: "screen",
       auto: !!auto, drain: drain }));
   if (btn) {
-    if (btn.classList.contains("iconbtn")) {
-      btn.textContent = "✓"; btn.disabled = true; btn.classList.add("done");
-    } else { btn.textContent = "Reserved ✓"; btn.disabled = true; }
+    if (btn.classList.contains("iconbtn")) setRsvIcon(btn, true); // optimistic
+    else { btn.textContent = "Reserved ✓"; btn.disabled = true; }
   }
 }
 function videoCard(it) {
@@ -624,7 +635,8 @@ function videoCard(it) {
   thumbwrap.title = "Play now";
   thumbwrap.addEventListener("click", () => playNowVideo(it, null));
   const rsv = el("button", "iconbtn", "+");
-  rsv.title = "Reserve";
+  rsv.dataset.videoid = it.videoId;
+  setRsvIcon(rsv, queue.some(q => q.videoId === it.videoId));
   rsv.addEventListener("click", (e) => { e.stopPropagation(); reserveVideo(it, rsv); });
   thumbwrap.appendChild(rsv);
   const meta = el("div", "meta");
