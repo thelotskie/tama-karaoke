@@ -75,10 +75,13 @@
   body.has-video #portraitRelated { display: block; order: 3;
     position: relative; z-index: 2; padding: 10px 12px 40px;
     max-width: 1280px; margin: 0 auto; width: 100%; }
-  /* narrow screens: pin the video to the top while related scrolls under it */
+  /* narrow screens: pin the video to the top while related scrolls under it.
+     topbar stays fixed so buttons are always reachable. */
   @media (max-width: 899px) {
-    body.has-video #topbar { position: relative; }
-    body.has-video #ytwrap { position: sticky; top: 0; z-index: 5;
+    body.has-video { padding-top: 62px; }
+    body.has-video #topbar { position: fixed; top: 0; left: 0; right: 0;
+      z-index: 10; }
+    body.has-video #ytwrap { position: sticky; top: 62px; z-index: 5;
       background: #000; }
   }
   /* desktop web: video left, related right with its own scroll (video stays put) */
@@ -95,6 +98,10 @@
     body.has-video #portraitRelated { order: 0; grid-column: 2; grid-row: 2;
       max-width: none; width: auto; margin: 0; padding: 10px 10px 30px;
       overflow-y: auto; min-height: 0; }
+    /* panels dock into the right column instead of covering the video */
+    body.has-video .panel { left: auto; right: 0; transform: none;
+      width: 380px; top: 0; bottom: 0; border-radius: 0;
+      border-left: 1px solid #2b3a63; }
   }
   .tbtn { background: rgba(20,28,52,.85); color: #eef2ff; border: 1px solid #2b3a63;
     border-radius: 10px; padding: 9px 16px; font-size: 15px; cursor: pointer; }
