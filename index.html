@@ -271,15 +271,11 @@ function reportNow(videoId, title, state) {
     ws.send(JSON.stringify({ t: "now", videoId, title, state }));
 }
 
-/* ---------- plyr player (YouTube provider) ---------- */
-function ensurePlayer() {
-  if (plyr) return;
-  plyr = new Plyr("#plyr", {
-    autoplay: true,
-    controls: ["play-large", "play", "progress", "current-time",
-               "mute", "volume", "fullscreen"],
-    youtube: { rel: 0, modestbranding: 1, iv_load_policy: 3 }
-  });
+/* ---------- plyr player (YouTube provider) ----------
+   Plyr only initializes an embed when the target carries
+   data-plyr-provider / data-plyr-embed-id, so we rebuild the
+   embed node for every song instead of reusing one bare div. */
+function wirePlayerEvents() {
   plyr.on("ended", () => {
     if (currentId && ws && ws.readyState === 1)
       ws.send(JSON.stringify({ t: "ended", id: currentId }));
@@ -298,12 +294,23 @@ function ensurePlayer() {
   });
 }
 function playVideo(v) {
-  ensurePlayer();
-  plyr.source = {
-    type: "video",
-    title: v.title,
-    sources: [{ src: v.videoId, provider: "youtube" }]
-  };
+  if (!/^[A-Za-z0-9_-]{11}$/.test(v.videoId || "")) return;
+  try { if (plyr) plyr.destroy(); } catch (e) {}
+  plyr = null;
+  const wrap = $("ytwrap");
+  wrap.innerHTML = "";
+  const node = document.createElement("div");
+  node.id = "plyr";
+  node.setAttribute("data-plyr-provider", "youtube");
+  node.setAttribute("data-plyr-embed-id", v.videoId);
+  wrap.appendChild(node);
+  plyr = new Plyr("#plyr", {
+    autoplay: true,
+    controls: ["play-large", "play", "progress", "current-time",
+               "mute", "volume", "fullscreen"],
+    youtube: { rel: 0, modestbranding: 1, iv_load_policy: 3 }
+  });
+  wirePlayerEvents();
 }
 
 /* ---------- search (this screen can reserve too) ---------- */
