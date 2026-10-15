@@ -80,6 +80,10 @@
       background: #0a0f1e; }
     body.has-video #ytwrap { position: sticky; top: var(--topbar-h, 60px);
       z-index: 5; background: #000; margin-top: 0; }
+    /* panels sit below the sticky video instead of covering it (v35) */
+    body.has-video .panel {
+      top: calc(var(--topbar-h, 60px) + min(1280px, 94vw, 72vh * 16 / 9) * 9 / 16 + 12px);
+      left: 8px; right: 8px; transform: none; width: auto; }
   }
   /* desktop web: video left, related right with its own scroll (video stays put) */
   @media (min-width: 900px) {
