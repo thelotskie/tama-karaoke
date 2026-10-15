@@ -184,6 +184,9 @@
     background: #2b3a63; color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; }
   #clearbtn { margin-top: 8px; width: 100%; padding: 12px; border-radius: 10px; border: none;
     background: #5c1f2e; color: #ffb3c1; font-size: 15px; font-weight: 700; cursor: pointer; }
+  /* queue: skip/clear pinned in the fixed header like the search box (v38) */
+  #queuehead { display: flex; gap: 8px; }
+  #queuehead #skipbtn, #queuehead #clearbtn { margin-top: 0; flex: 1; }
   /* remote / QR */
   #qrwrap { text-align: center; padding: 10px; }
   #qrbox img, #qrbox canvas, #qrbox table { margin: 0 auto; background: #fff;
@@ -250,10 +253,12 @@
 
 <div class="panel" id="panel-queue">
   <header><h2>Up next</h2><button class="x" data-close>&times;</button></header>
-  <div class="pbody">
-    <div id="qlist"></div>
+  <div class="phead" id="queuehead">
     <button id="skipbtn">Skip this song &#9199;</button>
     <button id="clearbtn" onclick="clearQueue()">&#128465; Clear queue</button>
+  </div>
+  <div class="pbody">
+    <div id="qlist"></div>
     <label id="autoplayRow"><input type="checkbox" id="autoplayChk" checked> Autoplay: play related when the queue runs out</label>
     <div style="margin-top:18px">
       <div class="sectitle">Related</div>
