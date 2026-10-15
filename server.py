@@ -29,7 +29,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 8
+CODE_VERSION = 9
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -530,14 +530,23 @@ class Handler(BaseHTTPRequestHandler):
             qs = urllib.parse.parse_qs(parsed.query)
             video_id = qs.get("videoId", [""])[0].strip()
             channel = qs.get("channel", [""])[0].strip()
-            if video_id:
+            title = qs.get("title", [""])[0].strip()
+            items, err = [], None
+            if title:
+                # primary: song-based "<title> karaoke" via the free no-key
+                # scrape (0 quota). Channel-uploads lookup shows junk when
+                # the playing video came from a non-karaoke channel.
+                q = title if "karaoke" in title.lower() else title + " karaoke"
+                items, err = _scrape_search(q, max_results=12)
+            if not items and video_id:
+                # fallback: latest uploads from the same channel (~3 units)
                 items, err = channel_uploads(video_id)
                 if _key_limited(err):
                     # key can't serve: no-key scrape of the channel's karaoke
                     items, err = _scrape_search(
                         (channel + " karaoke") if channel else "",
                         max_results=12)
-            else:
+            if not items and not video_id and not title:
                 # legacy fallback for callers without a videoId
                 items, err = youtube_search(
                     (channel + " karaoke") if channel else "", max_results=12)

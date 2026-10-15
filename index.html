@@ -607,7 +607,8 @@ async function loadRelated(head) {
   d.id = "nores"; list.appendChild(d);
   try {
     const r = await fetch("/api/related?videoId=" + encodeURIComponent(head.videoId) +
-                          "&channel=" + encodeURIComponent(head.channel || ""));
+                          "&channel=" + encodeURIComponent(head.channel || "") +
+                          "&title=" + encodeURIComponent(head.title || ""));
     const data = await r.json();
     list.innerHTML = "";
     if (plist) plist.innerHTML = "";
