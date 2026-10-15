@@ -71,6 +71,9 @@
     border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; font-size: 14px; }
   .sectitle { font-size: 13px; font-weight: 800; letter-spacing: 1px;
     color: #8b96bd; margin: 6px 0 4px; text-transform: uppercase; }
+  #autoplayRow { display: flex; align-items: center; gap: 8px; margin-top: 12px;
+    color: #aeb8d8; font-size: 14px; cursor: pointer; }
+  #autoplayRow input { accent-color: #06d6a0; width: 16px; height: 16px; }
   /* queue */
   .qrow { display: flex; gap: 12px; align-items: center; padding: 10px;
     border-bottom: 1px solid #1a2440; border-radius: 10px; }
@@ -148,6 +151,7 @@
   <div class="pbody">
     <div id="qlist"></div>
     <button id="skipbtn">Skip this song &#9199;</button>
+    <label id="autoplayRow"><input type="checkbox" id="autoplayChk" checked> Autoplay: play related when the queue runs out</label>
     <div style="margin-top:18px">
       <div class="sectitle">Related</div>
       <div id="relatedList"></div>
@@ -284,6 +288,7 @@ function onQueue(items) {
       reportNow("", "", "idle");
       $("nowticker").textContent = "Music from YouTube";
       $("relatedList").innerHTML = "";
+      maybeAutoplay();
     }
     return;
   }
@@ -450,6 +455,30 @@ function renderRecent() {
   }
   recentPlayed.forEach(it => list.appendChild(videoCard(it)));
 }
+/* ---------- autoplay: when the queue runs dry, play the next related ---------- */
+let lastRelated = [];
+function autoplayOn() {
+  try { return localStorage.getItem("tama_autoplay") !== "off"; }
+  catch (e) { return true; }
+}
+function initAutoplay() {
+  const chk = $("autoplayChk");
+  if (!chk) return;
+  chk.checked = autoplayOn();
+  chk.addEventListener("change", () => {
+    try { localStorage.setItem("tama_autoplay", chk.checked ? "on" : "off"); }
+    catch (e) {}
+  });
+}
+function maybeAutoplay() {
+  if (!autoplayOn() || !lastRelated.length) return;
+  const seen = {};
+  recentPlayed.forEach(i => { seen[i.videoId] = 1; });
+  const it = lastRelated.find(i => i.videoId && !seen[i.videoId]) || lastRelated[0];
+  if (!it || !it.videoId) return;
+  reserveVideo(it, null);
+  $("nowticker").textContent = "Autoplay ▶ " + it.title;
+}
 /* ---------- related videos (for the song now playing) ---------- */
 async function loadRelated(head) {
   const list = $("relatedList");
@@ -462,6 +491,7 @@ async function loadRelated(head) {
     const data = await r.json();
     list.innerHTML = "";
     const items = (data.items || []).filter(it => it.videoId !== head.videoId).slice(0, 10);
+    lastRelated = items;
     if (!items.length) {
       const e2 = el("div", null, "No related videos found.");
       e2.id = "nores"; list.appendChild(e2); return;
@@ -590,6 +620,7 @@ function startApp() {
 $("startbtn").addEventListener("click", startApp);
 initSearchMode();
 initRecent();
+initAutoplay();
 showBg(true);
 /* the native screen app loads ?autostart=1 so no tap is needed */
 if (new URLSearchParams(location.search).get("autostart") === "1") startApp();
