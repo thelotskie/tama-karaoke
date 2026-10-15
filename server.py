@@ -29,7 +29,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 40
+CODE_VERSION = 41
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -607,11 +607,31 @@ class Handler(BaseHTTPRequestHandler):
                     # songs by the same artist, mixed up — never the same
                     # title repeated
                     core = _song_core(title)
-                    if core and len(core) >= 3:
-                        core_l = core.lower()
+                    core_l = (core.lower() if core and len(core) >= 3
+                              else "")
+                    if core_l:
                         items = [it for it in items
                                  if core_l not in (it.get("title") or "")
                                  .lower()]
+                    # backfill: if too few different songs, pull more from
+                    # the artist's greatest-hits / live searches (same
+                    # artist, same genre) so related never runs dry
+                    seen = set(it.get("videoId") for it in items)
+                    if len(items) < 8 and artist:
+                        for bq in ((artist + " greatest hits" + k_suffix)
+                                   .strip(),
+                                   (artist + " live" + k_suffix).strip()):
+                            bitems, _ = _scrape_search(bq, max_results=12)
+                            for it in bitems:
+                                vid = it.get("videoId")
+                                ititle = (it.get("title") or "").lower()
+                                if (vid and vid not in seen and vid != video_id
+                                        and (not core_l or
+                                             core_l not in ititle)):
+                                    items.append(it)
+                                    seen.add(vid)
+                            if len(items) >= 12:
+                                break
                     # mix up the order so it's not just top search hits
                     import random
                     random.shuffle(items)
