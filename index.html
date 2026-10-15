@@ -20,6 +20,10 @@
     left: 50%; top: 50%; transform: translate(-50%, -50%); background: #000; }
   #ytwrap.on { opacity: 1; }
   #plyr, #plyr .plyr { width: 100%; height: 100%; }
+  /* zoom OFF (v36): show the full YouTube frame, nothing cropped.
+     Trade-off: YouTube's own title bar and buttons become visible. */
+  .plyr--full-ui .plyr__video-embed > .plyr__video-embed__container {
+    padding-bottom: 56.25% !important; transform: none !important; }
   :root { --plyr-color-main: #ffd166;
     /* bigger controls for TV/monitor viewing from a distance */
     --plyr-control-icon-size: 22px;
