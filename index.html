@@ -576,7 +576,12 @@ function renderRecent() {
    video becomes a 16:9 block on top, related videos list below it. */
 function applyScreenAppOrientation() {
   const portrait = window.matchMedia("(orientation: portrait)").matches;
-  document.body.classList.toggle("screenapp-portrait", portrait);
+  /* portrait layout is for phones / the screen app — desktop browsers keep
+     the fullscreen video even in a narrow window */
+  const isScreenApp = new URLSearchParams(location.search).get("mode") === "screenapp";
+  const isTouch = window.matchMedia("(pointer: coarse)").matches;
+  document.body.classList.toggle("screenapp-portrait",
+    portrait && (isScreenApp || isTouch));
 }
 window.addEventListener("resize", applyScreenAppOrientation);
 window.addEventListener("orientationchange", applyScreenAppOrientation);
