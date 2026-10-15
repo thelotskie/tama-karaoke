@@ -738,9 +738,15 @@ async function loadMoreRelated() {
     const items = (data.items || []).filter(it =>
       it.videoId && !lastRelated.some(x => x.videoId === it.videoId));
     const plist = $("portraitRelatedList");
+    const sentinel = $("relatedSentinel");
     if (!items.length) { relatedDone = true; }
     else {
-      items.forEach(it => { if (plist) plist.appendChild(videoCard(it)); });
+      items.forEach(it => {
+        const card = videoCard(it);
+        /* keep the sentinel last so it keeps triggering */
+        if (sentinel) plist.insertBefore(card, sentinel);
+        else if (plist) plist.appendChild(card);
+      });
       lastRelated.push(...items);
     }
   } catch (e) {}
@@ -760,10 +766,26 @@ function checkRelatedScroll() {
   if (window.innerHeight + y >= fullH - 300) loadMoreRelated();
 }
 function initRelatedScroll() {
+  const plist = $("portraitRelatedList");
+  if (!plist || plist.dataset.infinite) return;
+  plist.dataset.infinite = "1";
+  /* sentinel at the end: when it nears the viewport, load more.
+     works no matter which element actually scrolls. */
+  let sentinel = $("relatedSentinel");
+  if (!sentinel) {
+    sentinel = document.createElement("div");
+    sentinel.id = "relatedSentinel";
+    sentinel.style.cssText = "height:2px;";
+    plist.appendChild(sentinel);
+  }
+  const io = new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting) loadMoreRelated();
+  }, { rootMargin: "400px" });
+  io.observe(sentinel);
+  /* keep old scroll listeners as fallback */
   const scroller = $("portraitRelated");
-  if (!scroller || scroller.dataset.infinite) return;
-  scroller.dataset.infinite = "1";
-  scroller.addEventListener("scroll", checkRelatedScroll, { passive: true });
+  if (scroller) scroller.addEventListener("scroll", checkRelatedScroll,
+    { passive: true });
   window.addEventListener("scroll", checkRelatedScroll, { passive: true });
   document.body.addEventListener("scroll", checkRelatedScroll,
     { passive: true });
