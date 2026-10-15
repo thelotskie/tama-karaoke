@@ -29,7 +29,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 41
+CODE_VERSION = 42
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -211,6 +211,8 @@ def handle_message(c, msg):
                     "title": msg.get("title", "Unknown"),
                     "channel": msg.get("channel", ""),
                     "thumb": msg.get("thumb", ""),
+                    "views": msg.get("views", ""),
+                    "published": msg.get("published", ""),
                     "by": c.get("name") or msg.get("by") or "screen",
                 })
         broadcast_queue()
@@ -461,8 +463,13 @@ def _scrape_search(q, max_results=15):
                     break
             thumbs = vr.get("thumbnail", {}).get("thumbnails", [])
             thumb = thumbs[-1].get("url", "") if thumbs else ""
+            # "1.2M views" and "2 days ago" like YouTube shows
+            views = (vr.get("viewCountText", {}).get("simpleText") or "")
+            published = (vr.get("publishedTimeText", {}).get("simpleText")
+                         or "")
             out.append({"videoId": vid, "title": title,
-                        "channel": ch, "thumb": thumb})
+                        "channel": ch, "thumb": thumb,
+                        "views": views, "published": published})
             if len(out) >= max_results:
                 return out, None
     return out, None
@@ -496,13 +503,45 @@ def _api_search(q, max_results=15):
             continue
         thumbs = sn.get("thumbnails") or {}
         thumb = (thumbs.get("medium") or thumbs.get("default") or {}).get("url", "")
+        # snippet has publishedAt (ISO); format like "2 days ago"
+        pub = _rel_time(sn.get("publishedAt", ""))
         items.append({
             "videoId": vid,
             "title": sn.get("title", ""),
             "channel": sn.get("channelTitle", ""),
             "thumb": thumb,
+            "views": "",
+            "published": pub,
         })
     return items, None
+
+
+def _rel_time(iso):
+    """'2026-10-10T12:00:00Z' -> '5 days ago' (YouTube style)."""
+    if not iso:
+        return ""
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        secs = (datetime.now(timezone.utc) - dt).total_seconds()
+        if secs < 0:
+            return ""
+        mins, hours, days = secs / 60, secs / 3600, secs / 86400
+        if mins < 1:
+            return "just now"
+        if mins < 60:
+            return "%d minute%s ago" % (mins, "" if mins == 1 else "s")
+        if hours < 24:
+            return "%d hour%s ago" % (hours, "" if hours == 1 else "s")
+        if days < 30:
+            return "%d day%s ago" % (days, "" if days == 1 else "s")
+        if days < 365:
+            m = int(days / 30)
+            return "%d month%s ago" % (m, "" if m == 1 else "s")
+        y = int(days / 365)
+        return "%d year%s ago" % (y, "" if y == 1 else "s")
+    except Exception:
+        return ""
 
 
 def _key_limited(err):
