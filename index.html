@@ -37,6 +37,21 @@
     #nowticker { font-size: 12px; }
     .tbtn .blabel { display: none; }
   }
+  /* narrow screens: stack video cards (thumb+title on top, buttons full
+     width below) so titles and buttons never overlap */
+  @media (max-width: 700px) {
+    .card { flex-wrap: wrap; }
+    .card img { width: 120px; height: 68px; }
+    .card .meta { flex: 1; min-width: 140px; }
+    .card .actions { flex: 1 1 100%; }
+    .card .actions .playnow, .card .actions .reserve { flex: 1; padding: 10px 8px; }
+  }
+    #topbar { padding: 6px 10px; gap: 6px; }
+    .tbtn { padding: 9px 12px; font-size: 14px; }
+    #btn-collapse { padding: 9px 12px; }
+    #nowticker { font-size: 12px; }
+    .tbtn .blabel { display: none; }
+  }
   /* Screen-app portrait mode (page loaded with ?mode=screenapp on a portrait
      screen): the video becomes a 16:9 block at the top and related videos
      list below it instead of fullscreen. Landscape is unchanged. */
@@ -482,13 +497,12 @@ function renderRecent() {
   }
   recentPlayed.forEach(it => list.appendChild(videoCard(it)));
 }
-/* ---------- screen-app portrait mode (Karaoke Screen APK only) ---------- */
-const isScreenApp =
-  new URLSearchParams(location.search).get("mode") === "screenapp";
+/* ---------- screen-app portrait mode ---------- */
+/* Portrait layout now applies to every portrait viewport (app and web):
+   video becomes a 16:9 block on top, related videos list below it. */
 function applyScreenAppOrientation() {
   const portrait = window.matchMedia("(orientation: portrait)").matches;
-  document.body.classList.toggle("screenapp-portrait",
-    isScreenApp && portrait);
+  document.body.classList.toggle("screenapp-portrait", portrait);
 }
 window.addEventListener("resize", applyScreenAppOrientation);
 window.addEventListener("orientationchange", applyScreenAppOrientation);
