@@ -24,10 +24,6 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.environ.get("PORT", "8765"))
-
-# Karaoke-only search: when True, every query becomes "<query> karaoke".
-# Turned OFF on Othelo's word 2026-10-14 — set back to True when he says so.
-KARAOKE_ONLY = False
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
@@ -221,22 +217,32 @@ def handle_message(c, msg):
 
 # ------------------------------------------------------------- youtube api
 
-def youtube_search(q):
-    """Search YouTube for '<q> karaoke'. Returns (items, error)."""
+def youtube_search(q, related_to=None):
+    """Search YouTube. related_to: a videoId for 'related videos' mode."""
     key = load_key()
     if not key:
         return [], "no_key"
-    if not q:
-        return [], None
-    params = urllib.parse.urlencode({
-        "part": "snippet",
-        "type": "video",
-        "videoEmbeddable": "true",
-        "maxResults": 15,
-        "order": "relevance",
-        "q": (q + " karaoke") if KARAOKE_ONLY else q,
-        "key": key,
-    })
+    if related_to:
+        params = urllib.parse.urlencode({
+            "part": "snippet",
+            "type": "video",
+            "videoEmbeddable": "true",
+            "maxResults": 12,
+            "relatedToVideoId": related_to,
+            "key": key,
+        })
+    else:
+        if not q:
+            return [], None
+        params = urllib.parse.urlencode({
+            "part": "snippet",
+            "type": "video",
+            "videoEmbeddable": "true",
+            "maxResults": 15,
+            "order": "relevance",
+            "q": q,
+            "key": key,
+        })
     url = "https://www.googleapis.com/youtube/v3/search?" + params
     try:
         with urllib.request.urlopen(url, timeout=12) as r:
@@ -285,10 +291,12 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_ws()
             return
 
-        # --- youtube search proxy ---
+        # --- youtube search proxy (q= text query, relatedTo= videoId) ---
         if parsed.path == "/api/search":
-            q = urllib.parse.parse_qs(parsed.query).get("q", [""])[0]
-            items, err = youtube_search(q)
+            qs = urllib.parse.parse_qs(parsed.query)
+            q = qs.get("q", [""])[0]
+            related_to = qs.get("relatedTo", [""])[0] or None
+            items, err = youtube_search(q, related_to)
             body = json.dumps({"items": items, "error": err}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

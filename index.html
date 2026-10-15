@@ -50,6 +50,9 @@
     border: 1px solid #2b3a63; background: #0b1226; color: #eef2ff; }
   #gosearch { padding: 12px 22px; font-size: 16px; border-radius: 10px; border: none;
     background: #ffd166; color: #201500; font-weight: 700; cursor: pointer; }
+  #moderow { display: flex; gap: 18px; margin-top: 10px; color: #aeb8d8; font-size: 14px; }
+  #moderow label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+  #moderow input { accent-color: #ffd166; width: 16px; height: 16px; }
   #nores { color: #8b96bd; text-align: center; padding: 30px; }
   .card { display: flex; gap: 12px; align-items: center; padding: 10px;
     border-bottom: 1px solid #1a2440; }
@@ -62,6 +65,8 @@
     padding: 10px 18px; font-size: 14px; font-weight: 700; cursor: pointer; flex-shrink: 0; }
   .notice { background: #3a2b00; border: 1px solid #8a6d1c; color: #ffd166;
     border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; font-size: 14px; }
+  .sectitle { font-size: 13px; font-weight: 800; letter-spacing: 1px;
+    color: #8b96bd; margin: 6px 0 4px; text-transform: uppercase; }
   /* queue */
   .qrow { display: flex; gap: 12px; align-items: center; padding: 10px;
     border-bottom: 1px solid #1a2440; border-radius: 10px; }
@@ -122,6 +127,14 @@
       <input id="q" placeholder="Song title or artist&hellip;" autocomplete="off">
       <button id="gosearch">Search</button>
     </div>
+    <div id="moderow">
+      <label><input type="radio" name="smode" value="normal" checked> Normal</label>
+      <label><input type="radio" name="smode" value="karaoke"> Karaoke</label>
+    </div>
+    <div id="recentBox" style="margin-top:14px">
+      <div class="sectitle">Recent</div>
+      <div id="recentList"></div>
+    </div>
     <div id="results" style="margin-top:14px"></div>
   </div>
 </div>
@@ -131,6 +144,10 @@
   <div class="pbody">
     <div id="qlist"></div>
     <button id="skipbtn">Skip this song &#9199;</button>
+    <div style="margin-top:18px">
+      <div class="sectitle">Related</div>
+      <div id="relatedList"></div>
+    </div>
   </div>
 </div>
 
@@ -262,6 +279,7 @@ function onQueue(items) {
       showBg(true);
       reportNow("", "", "idle");
       $("nowticker").textContent = "Music from YouTube";
+      $("relatedList").innerHTML = "";
     }
     return;
   }
@@ -270,6 +288,8 @@ function onQueue(items) {
     $("nowticker").textContent = "♪ " + head.title;
     try { playVideo(head); } catch (e) {}
     showBg(false);
+    pushRecent(head);
+    loadRelated(head.videoId);
   }
 }
 
@@ -334,15 +354,105 @@ function el(tag, cls, text) {
   if (text !== undefined) e.textContent = text;
   return e;
 }
+/* one video row with a Reserve button — shared by search, recent, related */
+function reserveVideo(v, btn) {
+  if (ws && ws.readyState === 1)
+    ws.send(JSON.stringify({ t: "reserve", videoId: v.videoId, title: v.title,
+      channel: v.channel, thumb: v.thumb, by: "screen" }));
+  if (btn) { btn.textContent = "Reserved ✓"; btn.disabled = true; }
+}
+function videoCard(it) {
+  const card = el("div", "card");
+  const img = el("img"); img.src = it.thumb; img.alt = "";
+  const meta = el("div", "meta");
+  meta.appendChild(el("div", "t", it.title));
+  meta.appendChild(el("div", "c", it.channel || ""));
+  const btn = el("button", "reserve", "Reserve");
+  btn.addEventListener("click", () => reserveVideo(it, btn));
+  card.appendChild(img); card.appendChild(meta); card.appendChild(btn);
+  return card;
+}
+/* ---------- recently played (this screen, kept locally) ---------- */
+let recentPlayed = [];
+function initRecent() {
+  try {
+    recentPlayed = JSON.parse(localStorage.getItem("tama_recent_played") || "[]");
+    if (!Array.isArray(recentPlayed)) recentPlayed = [];
+  } catch (e) { recentPlayed = []; }
+  renderRecent();
+}
+function pushRecent(v) {
+  if (!v || !v.videoId) return;
+  recentPlayed = [{ videoId: v.videoId, title: v.title,
+    channel: v.channel, thumb: v.thumb }]
+    .concat(recentPlayed.filter(i => i.videoId !== v.videoId)).slice(0, 20);
+  try { localStorage.setItem("tama_recent_played", JSON.stringify(recentPlayed)); }
+  catch (e) {}
+  renderRecent();
+}
+function renderRecent() {
+  const list = $("recentList");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!recentPlayed.length) {
+    const d = el("div", null, "Nothing played yet — songs you play will show up here.");
+    d.id = "nores"; list.appendChild(d); return;
+  }
+  recentPlayed.forEach(it => list.appendChild(videoCard(it)));
+}
+/* ---------- related videos (for the song now playing) ---------- */
+async function loadRelated(videoId) {
+  const list = $("relatedList");
+  list.innerHTML = "";
+  if (!videoId) return;
+  const d = el("div", null, "Loading related videos…");
+  d.id = "nores"; list.appendChild(d);
+  try {
+    const r = await fetch("/api/search?relatedTo=" + encodeURIComponent(videoId));
+    const data = await r.json();
+    list.innerHTML = "";
+    const items = (data.items || []).filter(it => it.videoId !== videoId).slice(0, 10);
+    if (!items.length) {
+      const e2 = el("div", null, "No related videos found.");
+      e2.id = "nores"; list.appendChild(e2); return;
+    }
+    items.forEach(it => list.appendChild(videoCard(it)));
+  } catch (e) {
+    list.innerHTML = "";
+    const e2 = el("div", null, "Couldn't load related videos.");
+    e2.id = "nores"; list.appendChild(e2);
+  }
+}
+/* ---------- search mode: normal / karaoke ---------- */
+function searchMode() {
+  const sel = document.querySelector('input[name="smode"]:checked');
+  return sel ? sel.value : "normal";
+}
+function initSearchMode() {
+  try {
+    const saved = localStorage.getItem("tama_search_mode");
+    if (saved === "karaoke" || saved === "normal") {
+      const r = document.querySelector('input[name="smode"][value="' + saved + '"]');
+      if (r) r.checked = true;
+    }
+  } catch (e) {}
+  document.querySelectorAll('input[name="smode"]').forEach(r =>
+    r.addEventListener("change", () => {
+      try { localStorage.setItem("tama_search_mode", searchMode()); } catch (e) {}
+    }));
+}
+
 async function doSearch() {
   const q = $("q").value.trim();
   const box = $("results");
   box.innerHTML = "";
-  if (!q) return;
-  box.appendChild(el("div", null, "Searching YouTube for “" + q + "”…")).id = "nores";
+  if (!q) { $("recentBox").style.display = ""; return; }
+  $("recentBox").style.display = "none";
+  const query = searchMode() === "karaoke" ? q + " karaoke" : q;
+  box.appendChild(el("div", null, "Searching YouTube for “" + query + "”…")).id = "nores";
   let data;
   try {
-    const r = await fetch("/api/search?q=" + encodeURIComponent(q));
+    const r = await fetch("/api/search?q=" + encodeURIComponent(query));
     data = await r.json();
   } catch (e) {
     box.innerHTML = "";
@@ -382,22 +492,7 @@ async function doSearch() {
     const d = el("div", null, data.error ? "Search error: " + data.error : "No karaoke versions found.");
     d.id = "nores"; box.appendChild(d); return;
   }
-  data.items.forEach(it => {
-    const card = el("div", "card");
-    const img = el("img"); img.src = it.thumb; img.alt = "";
-    const meta = el("div", "meta");
-    meta.appendChild(el("div", "t", it.title));
-    meta.appendChild(el("div", "c", it.channel));
-    const btn = el("button", "reserve", "Reserve");
-    btn.addEventListener("click", () => {
-      if (ws && ws.readyState === 1)
-        ws.send(JSON.stringify({ t: "reserve", videoId: it.videoId,
-          title: it.title, channel: it.channel, thumb: it.thumb, by: "screen" }));
-      btn.textContent = "Reserved ✓"; btn.disabled = true;
-    });
-    card.appendChild(img); card.appendChild(meta); card.appendChild(btn);
-    box.appendChild(card);
-  });
+  data.items.forEach(it => box.appendChild(videoCard(it)));
 }
 $("gosearch").addEventListener("click", doSearch);
 $("q").addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
@@ -443,6 +538,8 @@ function startApp() {
   connect();
 }
 $("startbtn").addEventListener("click", startApp);
+initSearchMode();
+initRecent();
 showBg(true);
 /* the native screen app loads ?autostart=1 so no tap is needed */
 if (new URLSearchParams(location.search).get("autostart") === "1") startApp();
