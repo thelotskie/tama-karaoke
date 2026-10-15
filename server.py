@@ -72,6 +72,9 @@ clients = []          # list of dicts: {sock, role, name, send_lock}
 queue = []            # list of dicts: {id, videoId, title, channel, thumb, by}
 queue_seq = 0
 autoplay_on = True    # shared autoplay switch (all screens stay in sync)
+drain_seq = 0         # id of the latest queue-drain; autoplay reserves must
+                      # echo it, so stale clients and racers can't refill
+_drain_was_empty = True  # tracks empty->non-empty transitions for drain_seq
 
 def broadcast(obj, roles=None):
     """Send a JSON message to connected clients (optionally filtered by role)."""
@@ -88,10 +91,18 @@ def broadcast(obj, roles=None):
         drop_client(c)
 
 def broadcast_queue():
+    global drain_seq, _drain_was_empty
     with state_lock:
         items = [dict(i) for i in queue]
         ap = autoplay_on
-    broadcast({"t": "queue", "items": items, "autoplay": ap})
+        is_empty = not items
+        # new drain id only when the queue actually runs dry (not on
+        # every empty broadcast, or legit reserves would go stale)
+        if is_empty and not _drain_was_empty:
+            drain_seq += 1
+        _drain_was_empty = is_empty
+        drain = drain_seq
+    broadcast({"t": "queue", "items": items, "autoplay": ap, "drain": drain})
 
 def drop_client(c):
     with state_lock:
@@ -179,11 +190,14 @@ def handle_message(c, msg):
     elif t == "reserve":
         with state_lock:
             vid = msg.get("videoId", "")
-            # autoplay race: two screens draining at once may both
-            # auto-reserve the same video — ignore the duplicate
-            if msg.get("auto") and any(i.get("videoId") == vid for i in queue):
-                pass
-            else:
+            ok = True
+            if msg.get("auto"):
+                # autoplay reserve: honored only for the current drain while
+                # the queue is still empty — one autoplay per drain; stale
+                # clients (no drain) and racers are ignored
+                ok = (msg.get("drain") == drain_seq and not queue
+                      and not any(i.get("videoId") == vid for i in queue))
+            if ok:
                 queue_seq += 1
                 queue.append({
                     "id": "q%d" % queue_seq,
@@ -407,8 +421,6 @@ def _scrape_search(q, max_results=15):
                     break
             thumbs = vr.get("thumbnail", {}).get("thumbnails", [])
             thumb = thumbs[-1].get("url", "") if thumbs else ""
-            # skip obvious non-videos (playlists/shelves never reach here,
-            # but shorts and live replays are fine for karaoke)
             out.append({"videoId": vid, "title": title,
                         "channel": ch, "thumb": thumb})
             if len(out) >= max_results:
@@ -453,12 +465,19 @@ def _api_search(q, max_results=15):
     return items, None
 
 
+def _key_limited(err):
+    """True when the API key is missing, rate-limited, or out of quota —
+    i.e. when the no-key website scrape should take over."""
+    return bool(err) and (err == "no_key" or "429" in err
+                          or "quota" in err.lower())
+
+
 def youtube_search(q, max_results=15):
     """Search YouTube for q. API key first (reliable, structured); falls
-    back to the no-key website scrape when the key is rate-limited (429)
-    or out of quota. Returns (items, error)."""
+    back to the no-key website scrape when the key can't serve.
+    Returns (items, error)."""
     items, err = _api_search(q, max_results)
-    if err and ("429" in err or "quota" in err.lower()):
+    if _key_limited(err):
         return _scrape_search(q, max_results)
     return items, err
 
@@ -510,8 +529,8 @@ class Handler(BaseHTTPRequestHandler):
             channel = qs.get("channel", [""])[0].strip()
             if video_id:
                 items, err = channel_uploads(video_id)
-                if err and ("429" in err or "quota" in err.lower()):
-                    # key limited: no-key scrape of the channel's karaoke
+                if _key_limited(err):
+                    # key can't serve: no-key scrape of the channel's karaoke
                     items, err = _scrape_search(
                         (channel + " karaoke") if channel else "",
                         max_results=12)
@@ -589,9 +608,10 @@ def ws_hello_then_loop(c):
         with state_lock:
             items = [dict(i) for i in queue]
             ap = autoplay_on
+            dr = drain_seq
         try:
             ws_send(c, json.dumps({"t": "queue", "items": items,
-                                   "autoplay": ap}))
+                                   "autoplay": ap, "drain": dr}))
         except OSError:
             drop_client(c)
             return

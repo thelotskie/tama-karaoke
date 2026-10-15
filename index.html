@@ -324,17 +324,18 @@ function connect() {
   ws.onmessage = ev => {
     let m;
     try { m = JSON.parse(ev.data); } catch (e) { return; }
-    if (m.t === "queue") onQueue(m.items || [], m.autoplay);
+    if (m.t === "queue") onQueue(m.items || [], m.autoplay, m.drain);
     else if (m.t === "control") onControl(m.action);
   };
 }
 
-function onQueue(items, autoplay) {
+function onQueue(items, autoplay, drain) {
   queue = items;
   if (typeof autoplay === "boolean" && autoplay !== serverAutoplay) {
     serverAutoplay = autoplay;
     syncAutoplayChk();
   }
+  if (typeof drain === "number") currentDrain = drain;
   renderQueue();
   const head = items[0];
   if (!head) {
@@ -485,10 +486,11 @@ function el(tag, cls, text) {
   return e;
 }
 /* one video row with a Reserve button — shared by search, recent, related */
-function reserveVideo(v, btn, auto) {
+function reserveVideo(v, btn, auto, drain) {
   if (ws && ws.readyState === 1)
     ws.send(JSON.stringify({ t: "reserve", videoId: v.videoId, title: v.title,
-      channel: v.channel, thumb: v.thumb, by: "screen", auto: !!auto }));
+      channel: v.channel, thumb: v.thumb, by: "screen",
+      auto: !!auto, drain: drain }));
   if (btn) { btn.textContent = "Reserved ✓"; btn.disabled = true; }
 }
 function videoCard(it) {
@@ -554,6 +556,7 @@ window.addEventListener("orientationchange", applyScreenAppOrientation);
 /* ---------- autoplay: when the queue runs dry, play the next related ---------- */
 /* the switch lives on the server so all screens stay in sync */
 let serverAutoplay = true;
+let currentDrain = 0;
 let lastRelated = [];
 function initAutoplay() {
   const chk = $("autoplayChk");
@@ -576,7 +579,7 @@ function maybeAutoplay() {
   recentPlayed.forEach(i => { seen[i.videoId] = 1; });
   const it = lastRelated.find(i => i.videoId && !seen[i.videoId]) || lastRelated[0];
   if (!it || !it.videoId) return;
-  reserveVideo(it, null, true);
+  reserveVideo(it, null, true, currentDrain);
   $("nowticker").textContent = "Autoplay ▶ " + it.title;
 }
 /* ---------- related videos (for the song now playing) ---------- */
