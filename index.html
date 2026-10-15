@@ -75,6 +75,21 @@
   body.has-video #portraitRelated { display: block; order: 3;
     position: relative; z-index: 2; padding: 10px 12px 40px;
     max-width: 1280px; margin: 0 auto; width: 100%; }
+  /* desktop web: video left, related right with its own scroll (video stays put) */
+  @media (min-width: 900px) {
+    body.has-video { display: grid;
+      grid-template-columns: minmax(0, 1fr) 380px;
+      grid-template-rows: auto minmax(0, 1fr);
+      height: 100vh; overflow: hidden; }
+    body.has-video #topbar { order: 0; grid-column: 1 / -1; grid-row: 1;
+      position: relative; }
+    body.has-video #ytwrap { order: 0; grid-column: 1; grid-row: 2;
+      width: min(100% - 20px, calc((100vh - 140px) * 16 / 9));
+      margin: 10px auto; align-self: start; justify-self: center; }
+    body.has-video #portraitRelated { order: 0; grid-column: 2; grid-row: 2;
+      max-width: none; width: auto; margin: 0; padding: 10px 10px 30px;
+      overflow-y: auto; min-height: 0; }
+  }
   .tbtn { background: rgba(20,28,52,.85); color: #eef2ff; border: 1px solid #2b3a63;
     border-radius: 10px; padding: 9px 16px; font-size: 15px; cursor: pointer; }
   .tbtn:hover { background: #22305c; }
