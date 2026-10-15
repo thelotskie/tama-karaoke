@@ -29,7 +29,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 9
+CODE_VERSION = 10
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -318,6 +318,39 @@ def youtube_api(path, params):
     return _get_json(url)
 
 
+def _artist_from_title(title):
+    """Best-effort artist extraction from 'Artist - Song (...)' style titles.
+    Returns "" when no artist separator is found."""
+    t = (title or "").strip()
+    for sep in (" - ", " – ", " — "):
+        if sep in t:
+            return t.split(sep, 1)[0].strip()
+    return ""
+
+
+def _song_core(title):
+    """'Artist - Song (Karaoke…)' -> 'song': the song part, lowercased,
+    with (...) / [...] segments and ' | ...' suffixes stripped."""
+    t = (title or "").strip()
+    for sep in (" - ", " – ", " — "):
+        if sep in t:
+            t = t.split(sep, 1)[1]
+            break
+    for sep in (" | ", "｜"):
+        if sep in t:
+            t = t.split(sep, 1)[0]
+            break
+    out, depth = [], 0
+    for ch in t:
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth = max(0, depth - 1)
+        elif depth == 0:
+            out.append(ch)
+    return "".join(out).strip().lower()
+
+
 def channel_uploads(video_id, max_results=12):
     """Related videos = latest uploads from the same channel as video_id.
     Costs ~3 quota units total instead of 100 for a search."""
@@ -533,11 +566,28 @@ class Handler(BaseHTTPRequestHandler):
             title = qs.get("title", [""])[0].strip()
             items, err = [], None
             if title:
-                # primary: song-based "<title> karaoke" via the free no-key
-                # scrape (0 quota). Channel-uploads lookup shows junk when
-                # the playing video came from a non-karaoke channel.
-                q = title if "karaoke" in title.lower() else title + " karaoke"
-                items, err = _scrape_search(q, max_results=12)
+                # primary: artist-based "<artist> karaoke" via the free no-key
+                # scrape (0 quota) — different songs by the same artist,
+                # YouTube-radio style, instead of 10 copies of the same song
+                artist = _artist_from_title(title)
+                song_q = (title if "karaoke" in title.lower()
+                          else title + " karaoke")
+                queries = ([artist + " karaoke"] if artist else []) + [song_q]
+                items, err, used_artist = [], None, False
+                for i, qq in enumerate(queries):
+                    items, err = _scrape_search(qq, max_results=12)
+                    if items:
+                        used_artist = (i == 0 and bool(artist))
+                        break
+                if used_artist:
+                    # drop same-song uploads: related = DIFFERENT songs
+                    core = _song_core(title)
+                    if core and len(core) >= 3:
+                        diverse = [it for it in items
+                                   if core not in (it.get("title") or "")
+                                   .lower()]
+                        if len(diverse) >= 4:
+                            items = diverse
             if not items and video_id:
                 # fallback: latest uploads from the same channel (~3 units)
                 items, err = channel_uploads(video_id)
