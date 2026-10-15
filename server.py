@@ -232,6 +232,20 @@ def handle_message(c, msg):
                    "title": msg.get("title", ""),
                    "state": msg.get("state", "")}, roles=("remote",))
 
+    elif t == "progress":
+        # screen reports playback position so an interrupted song resumes
+        # where it left off instead of restarting from 0
+        vid = msg.get("videoId")
+        try:
+            pos = max(0, float(msg.get("time", 0)))
+        except (TypeError, ValueError):
+            pos = 0
+        if vid and pos > 0:
+            with state_lock:
+                if queue and queue[0].get("videoId") == vid:
+                    queue[0]["pos"] = pos
+        # no broadcast: pos is only read when the song (re)starts
+
 # ------------------------------------------------------------- youtube api
 
 def _get_json(url, tries=3):

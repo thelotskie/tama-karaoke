@@ -374,6 +374,7 @@ function reportNow(videoId, title, state) {
    be playing; when YouTube pauses us while hidden, we nudge it back.
    The native Screen app drives these via its notification buttons. */
 let wantPlaying = false;
+let pendingSeek = 0; // resume position for the song now starting
 function safePlay() {
   if (!plyr) return;
   try {
@@ -403,9 +404,20 @@ function wirePlayerEvents() {
   plyr.on("playing", () => {
     wantPlaying = true;
     showBg(false);
+    if (pendingSeek > 0) {
+      /* interrupted earlier: resume where it left off, not from 0 */
+      const s = pendingSeek; pendingSeek = 0;
+      try { plyr.currentTime = s; } catch (e) {}
+      if (currentVideo) {
+        const mm = Math.floor(s / 60), ss = ("0" + Math.floor(s % 60)).slice(-2);
+        $("nowticker").textContent =
+          "♪ " + currentVideo.title + " (resumed " + mm + ":" + ss + ")";
+      }
+    }
     if (currentVideo) reportNow(currentVideo.videoId, currentVideo.title, "playing");
   });
   plyr.on("pause", () => {
+    reportProgress(true);
     if (document.hidden && wantPlaying) {
       /* YouTube auto-paused on hide — resume immediately. Timers get
          throttled while the page is hidden, so waiting would stall. */
@@ -421,10 +433,25 @@ function wirePlayerEvents() {
       ws.send(JSON.stringify({ t: "ended", id: currentId }));
   });
 }
+/* ---------- resume position: tell the server where we are ---------- */
+function reportProgress(force) {
+  try {
+    if (plyr && (force || !plyr.paused) && currentVideo &&
+        ws && ws.readyState === 1 && plyr.currentTime > 5) {
+      ws.send(JSON.stringify({ t: "progress", videoId: currentVideo.videoId,
+                               time: Math.floor(plyr.currentTime) }));
+    }
+  } catch (e) {}
+}
+setInterval(() => reportProgress(false), 10000);
+window.addEventListener("beforeunload", () => reportProgress(true));
+
 function playVideo(v) {
   if (!/^[A-Za-z0-9_-]{11}$/.test(v.videoId || "")) return;
   try { if (plyr) plyr.destroy(); } catch (e) {}
   plyr = null;
+  /* resume where it left off if the server stored a position (>10s in) */
+  pendingSeek = (v.pos && v.pos > 10) ? Math.floor(v.pos) : 0;
   const wrap = $("ytwrap");
   wrap.innerHTML = "";
   const node = document.createElement("div");
