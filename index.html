@@ -726,19 +726,29 @@ async function loadMoreRelated() {
   } catch (e) {}
   relatedLoading = false;
 }
+function checkRelatedScroll() {
+  /* desktop right column has its own scroll */
+  const scroller = $("portraitRelated");
+  if (scroller && scroller.scrollHeight > scroller.clientHeight + 10) {
+    if (scroller.scrollTop + scroller.clientHeight >=
+        scroller.scrollHeight - 300) { loadMoreRelated(); return; }
+  }
+  /* narrow layout: the body/document itself scrolls */
+  const doc = document.documentElement, body = document.body;
+  const y = window.scrollY || doc.scrollTop || body.scrollTop || 0;
+  const fullH = Math.max(doc.scrollHeight, body.scrollHeight);
+  if (window.innerHeight + y >= fullH - 300) loadMoreRelated();
+}
 function initRelatedScroll() {
   const scroller = $("portraitRelated");
   if (!scroller || scroller.dataset.infinite) return;
   scroller.dataset.infinite = "1";
-  scroller.addEventListener("scroll", () => {
-    if (scroller.scrollTop + scroller.clientHeight >=
-        scroller.scrollHeight - 300) loadMoreRelated();
-  });
-  /* stacked (narrow) layout: the page itself scrolls */
-  window.addEventListener("scroll", () => {
-    if (window.innerHeight + window.scrollY >=
-        document.body.scrollHeight - 300) loadMoreRelated();
-  }, { passive: true });
+  scroller.addEventListener("scroll", checkRelatedScroll, { passive: true });
+  window.addEventListener("scroll", checkRelatedScroll, { passive: true });
+  document.body.addEventListener("scroll", checkRelatedScroll,
+    { passive: true });
+  document.documentElement.addEventListener("scroll", checkRelatedScroll,
+    { passive: true });
 }
 /* ---------- search mode: normal / karaoke ---------- */
 function searchMode() {
