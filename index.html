@@ -61,19 +61,20 @@
     #nowticker { font-size: 12px; }
     .tbtn .blabel { display: none; }
   }
-  /* Screen-app portrait mode (page loaded with ?mode=screenapp on a portrait
-     screen): the video becomes a 16:9 block at the top and related videos
-     list below it instead of fullscreen. Landscape is unchanged. */
+  /* main layout: video on top (centered 16:9, sized to screen), related list
+     below it — page scrolls. */
   #portraitRelated { display: none; }
-  body.screenapp-portrait { display: flex; flex-direction: column;
-    height: 100%; overflow-y: auto; }
-  body.screenapp-portrait #topbar { position: static; order: 1; flex-shrink: 0; }
-  body.screenapp-portrait #ytwrap { position: relative; inset: auto; order: 2;
-    width: 100%; aspect-ratio: 16 / 9; flex-shrink: 0;
-    left: auto; top: auto; transform: none; }
-  body.screenapp-portrait #ytwrap:not(.on) { display: none; }
-  body.screenapp-portrait #portraitRelated { display: block; order: 3;
-    position: relative; z-index: 2; padding: 10px 12px 30px; }
+  body.has-video { display: flex; flex-direction: column;
+    min-height: 100%; overflow-y: auto; }
+  body.has-video #topbar { position: sticky; top: 0; order: 1; flex-shrink: 0; }
+  body.has-video #ytwrap { position: relative; inset: auto; order: 2;
+    width: min(1280px, 94vw, calc(72vh * 16 / 9)); aspect-ratio: 16 / 9;
+    flex-shrink: 0; left: auto; top: auto; transform: none;
+    margin: 10px auto; }
+  body.has-video #ytwrap:not(.on) { display: none; }
+  body.has-video #portraitRelated { display: block; order: 3;
+    position: relative; z-index: 2; padding: 10px 12px 40px;
+    max-width: 1280px; margin: 0 auto; width: 100%; }
   .tbtn { background: rgba(20,28,52,.85); color: #eef2ff; border: 1px solid #2b3a63;
     border-radius: 10px; padding: 9px 16px; font-size: 15px; cursor: pointer; }
   .tbtn:hover { background: #22305c; }
@@ -259,6 +260,7 @@ const connstate = $("connstate");
 function showBg(on) {
   $("bg").style.opacity = on ? "1" : "0";
   $("ytwrap").classList.toggle("on", !on);
+  applyVideoLayout();
   if (on && !bgTimer) {
     const next = () => {
       $("bg").style.backgroundImage = "url('" + BG_IMAGES[bgIdx % BG_IMAGES.length] + "')";
@@ -594,12 +596,13 @@ function renderRecent() {
 /* ---------- screen-app portrait mode ---------- */
 /* Portrait layout now applies to every portrait viewport (app and web):
    video becomes a 16:9 block on top, related videos list below it. */
-function applyScreenAppOrientation() {
-  const portrait = window.matchMedia("(orientation: portrait)").matches;
-  document.body.classList.toggle("screenapp-portrait", portrait);
+function applyVideoLayout() {
+  /* when a video is playing: video on top, related below, page scrolls */
+  document.body.classList.toggle("has-video",
+    document.getElementById("ytwrap").classList.contains("on"));
 }
-window.addEventListener("resize", applyScreenAppOrientation);
-window.addEventListener("orientationchange", applyScreenAppOrientation);
+window.addEventListener("resize", applyVideoLayout);
+applyVideoLayout();
 
 /* ---------- autoplay: when the queue runs dry, play the next related ---------- */
 /* the switch lives on the server so all screens stay in sync */
