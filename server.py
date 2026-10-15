@@ -320,7 +320,68 @@ def channel_uploads(video_id, max_results=12):
     return out, None
 
 
-def youtube_search(q, max_results=15):
+def _scrape_search(q, max_results=15):
+    """No-key YouTube search: fetch youtube.com/results HTML and parse the
+    embedded ytInitialData JSON — the same data the YouTube website itself
+    uses. No API key, no quota. Used as a fallback when the key is
+    rate-limited; returns ([items], error)."""
+    if not q:
+        return [], None
+    url = ("https://www.youtube.com/results?"
+           + urllib.parse.urlencode({"search_query": q}))
+    req = urllib.request.Request(url, headers={
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/120.0 Safari/537.36"),
+        "Accept-Language": "en-US,en;q=0.9",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            html = r.read().decode("utf-8", "replace")
+    except Exception as e:
+        return [], "scrape_error: %s" % e
+    marker = "var ytInitialData = "
+    idx = html.find(marker)
+    if idx < 0:
+        return [], "scrape_error: no ytInitialData (blocked?)"
+    try:
+        data, _ = json.JSONDecoder().raw_decode(html[idx + len(marker):])
+    except Exception as e:
+        return [], "scrape_error: bad json %s" % e
+    try:
+        contents = (data["contents"]["twoColumnSearchResultsRenderer"]
+                    ["primaryContents"]["sectionListRenderer"]["contents"])
+    except (KeyError, TypeError):
+        return [], "scrape_error: no results block"
+    out = []
+    for sec in contents:
+        for item in sec.get("itemSectionRenderer", {}).get("contents", []):
+            vr = item.get("videoRenderer")
+            if not vr:
+                continue
+            vid = vr.get("videoId")
+            if not vid:
+                continue
+            title = "".join(
+                x.get("text", "") for x in vr.get("title", {}).get("runs", []))
+            ch = ""
+            for key in ("ownerText", "longBylineText"):
+                runs = vr.get(key, {}).get("runs", [])
+                if runs:
+                    ch = runs[0].get("text", "")
+                    break
+            thumbs = vr.get("thumbnail", {}).get("thumbnails", [])
+            thumb = thumbs[-1].get("url", "") if thumbs else ""
+            # skip obvious non-videos (playlists/shelves never reach here,
+            # but shorts and live replays are fine for karaoke)
+            out.append({"videoId": vid, "title": title,
+                        "channel": ch, "thumb": thumb})
+            if len(out) >= max_results:
+                return out, None
+    return out, None
+
+
+def _api_search(q, max_results=15):
     """Search YouTube for q. Returns (items, error)."""
     key = load_key()
     if not key:
@@ -355,6 +416,16 @@ def youtube_search(q, max_results=15):
             "thumb": thumb,
         })
     return items, None
+
+
+def youtube_search(q, max_results=15):
+    """Search YouTube for q. API key first (reliable, structured); falls
+    back to the no-key website scrape when the key is rate-limited (429)
+    or out of quota. Returns (items, error)."""
+    items, err = _api_search(q, max_results)
+    if err and ("429" in err or "quota" in err.lower()):
+        return _scrape_search(q, max_results)
+    return items, err
 
 # ------------------------------------------------------------- http server
 
@@ -404,6 +475,11 @@ class Handler(BaseHTTPRequestHandler):
             channel = qs.get("channel", [""])[0].strip()
             if video_id:
                 items, err = channel_uploads(video_id)
+                if err and ("429" in err or "quota" in err.lower()):
+                    # key limited: no-key scrape of the channel's karaoke
+                    items, err = _scrape_search(
+                        (channel + " karaoke") if channel else "",
+                        max_results=12)
             else:
                 # legacy fallback for callers without a videoId
                 items, err = youtube_search(
