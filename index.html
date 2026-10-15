@@ -334,7 +334,17 @@ function connect() {
       /* server has newer code — reload (cache-busted) to pick it up */
       try {
         const u = new URL(location.href);
-        if (u.searchParams.get("v") === String(m.code_version)) return; // already tried
+        if (u.searchParams.get("v") === String(m.code_version)) {
+          /* already tried this version but still old code = cached HTML.
+             force one cache-busting reload per session. */
+          const k = "tama_hardreload_" + m.code_version;
+          if (!sessionStorage.getItem(k)) {
+            sessionStorage.setItem(k, "1");
+            u.searchParams.set("v", m.code_version + "_" + Date.now());
+            location.href = u.toString();
+          }
+          return;
+        }
         u.searchParams.set("v", m.code_version);
         location.href = u.toString();
       } catch (e) { location.reload(); }
