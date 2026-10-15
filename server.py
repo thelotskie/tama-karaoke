@@ -29,7 +29,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 39
+CODE_VERSION = 40
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -603,14 +603,18 @@ class Handler(BaseHTTPRequestHandler):
                         used_artist = (i == 0 and bool(artist))
                         break
                 if used_artist:
-                    # drop same-song uploads: related = DIFFERENT songs
+                    # drop same-song uploads STRICTLY: related = DIFFERENT
+                    # songs by the same artist, mixed up — never the same
+                    # title repeated
                     core = _song_core(title)
                     if core and len(core) >= 3:
-                        diverse = [it for it in items
-                                   if core not in (it.get("title") or "")
-                                   .lower()]
-                        if len(diverse) >= 4:
-                            items = diverse
+                        core_l = core.lower()
+                        items = [it for it in items
+                                 if core_l not in (it.get("title") or "")
+                                 .lower()]
+                    # mix up the order so it's not just top search hits
+                    import random
+                    random.shuffle(items)
             if not items and video_id:
                 # fallback: latest uploads from the same channel (~3 units)
                 items, err = channel_uploads(video_id)
@@ -646,6 +650,14 @@ class Handler(BaseHTTPRequestHandler):
             if exclude:
                 items = [it for it in items
                          if it.get("videoId") not in exclude]
+            # also drop same-song titles on load-more (strict, like initial)
+            core = _song_core(title)
+            if core and len(core) >= 3:
+                core_l = core.lower()
+                items = [it for it in items
+                         if core_l not in (it.get("title") or "").lower()]
+                import random
+                random.shuffle(items)
             body = json.dumps({"items": items, "error": err}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
