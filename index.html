@@ -116,6 +116,8 @@
   .panel header h2 { font-size: 18px; flex: 1; }
   .x { background: none; border: none; color: #8b96bd; font-size: 22px; cursor: pointer; }
   .pbody { padding: 16px 18px; overflow-y: auto; flex: 1; }
+  .phead { padding: 14px 18px; border-bottom: 1px solid #22305c;
+    flex-shrink: 0; }
   /* search */
   #searchrow { display: flex; gap: 10px; }
   #q { flex: 1; padding: 12px 14px; font-size: 16px; border-radius: 10px;
@@ -207,8 +209,7 @@
 
 <div class="panel" id="panel-search">
   <header><h2>Search</h2><button class="x" data-close>&times;</button></header>
-  <div class="pbody">
-    <div id="keynotice" class="notice" style="display:none"></div>
+  <div class="phead">
     <div id="searchrow">
       <input id="q" placeholder="Song title or artist&hellip;" autocomplete="off">
       <button id="gosearch">Search</button>
@@ -217,6 +218,9 @@
       <label><input type="radio" name="smode" value="normal" checked> Normal</label>
       <label><input type="radio" name="smode" value="karaoke"> Karaoke</label>
     </div>
+  </div>
+  <div class="pbody">
+    <div id="keynotice" class="notice" style="display:none"></div>
     <div id="recentBox" style="margin-top:14px">
       <div class="sectitle">Recent</div>
       <div id="recentList"></div>
