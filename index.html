@@ -12,7 +12,12 @@
   #bg { position: fixed; inset: 0; background-size: cover; background-position: center;
     transition: opacity 1.2s; z-index: 0; }
   #bg::after { content: ""; position: absolute; inset: 0; background: rgba(3,5,12,.55); }
-  #ytwrap { position: fixed; inset: 0; z-index: 1; opacity: 0; transition: opacity .8s; }
+  /* video: centered 16:9 frame sized to the screen — large but never full-bleed;
+     leaves margins around it. width picks the smallest of: 1280px cap,
+     94% of viewport width, or whatever fits the viewport height at 16:9 */
+  #ytwrap { position: fixed; z-index: 1; opacity: 0; transition: opacity .8s;
+    width: min(1280px, 94vw, calc(94vh * 16 / 9)); aspect-ratio: 16 / 9;
+    left: 50%; top: 50%; transform: translate(-50%, -50%); background: #000; }
   #ytwrap.on { opacity: 1; }
   #plyr, #plyr .plyr { width: 100%; height: 100%; }
   :root { --plyr-color-main: #ffd166;
@@ -64,7 +69,8 @@
     height: 100%; overflow-y: auto; }
   body.screenapp-portrait #topbar { position: static; order: 1; flex-shrink: 0; }
   body.screenapp-portrait #ytwrap { position: relative; inset: auto; order: 2;
-    width: 100%; aspect-ratio: 16 / 9; flex-shrink: 0; }
+    width: 100%; aspect-ratio: 16 / 9; flex-shrink: 0;
+    left: auto; top: auto; transform: none; }
   body.screenapp-portrait #ytwrap:not(.on) { display: none; }
   body.screenapp-portrait #portraitRelated { display: block; order: 3;
     position: relative; z-index: 2; padding: 10px 12px 30px; }
