@@ -72,12 +72,12 @@
     position: relative; z-index: 2; padding: 10px 12px 40px;
     max-width: 1280px; margin: 0 auto; width: 100%; }
   /* narrow screens: pin the video to the top while related scrolls under it.
-     topbar stays fixed so buttons are always reachable; video offset uses
-     the measured topbar height (--topbar-h). */
+     topbar and video are both sticky (no fixed, no padding) so they stack
+     with zero gap; video offset uses the measured topbar height. */
   @media (max-width: 899px) {
-    body.has-video { padding-top: var(--topbar-h, 60px); }
-    body.has-video #topbar { position: fixed; top: 0; left: 0; right: 0;
-      z-index: 10; background: #0a0f1e; }
+    body.has-video { padding-top: 0; }
+    body.has-video #topbar { position: sticky; top: 0; z-index: 10;
+      background: #0a0f1e; }
     body.has-video #ytwrap { position: sticky; top: var(--topbar-h, 60px);
       z-index: 5; background: #000; margin-top: 0; }
   }
