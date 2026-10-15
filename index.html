@@ -762,6 +762,7 @@ async function loadRelated(head) {
       list.appendChild(videoCard(it));
       if (plist) plist.appendChild(videoCard(it));
     });
+    ensureRelatedSentinel(); /* re-add after the wipe above */
     /* reset infinite scroll state for the new video */
     relatedHead = head; relatedPage = 0; relatedDone = false;
   } catch (e) {
@@ -816,23 +817,35 @@ function checkRelatedScroll() {
   const fullH = Math.max(doc.scrollHeight, body.scrollHeight);
   if (window.innerHeight + y >= fullH - 300) loadMoreRelated();
 }
+/* sentinel lives at the end of the related list; the observer fires
+   no matter which element actually scrolls. v46: recreated after every
+   loadRelated, which used to wipe it and kill load-more on Android. */
+let relatedIO = null;
+function ensureRelatedSentinel() {
+  const plist = $("portraitRelatedList");
+  if (!plist) return;
+  let sentinel = $("relatedSentinel");
+  if (!sentinel || sentinel.parentNode !== plist) {
+    if (sentinel) sentinel.remove();
+    sentinel = document.createElement("div");
+    sentinel.id = "relatedSentinel";
+    sentinel.style.cssText = "height:2px;";
+  }
+  plist.appendChild(sentinel); /* ensure it's last */
+  if (!relatedIO) {
+    relatedIO = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) loadMoreRelated();
+    }, { rootMargin: "400px" });
+  } else {
+    relatedIO.disconnect();
+  }
+  relatedIO.observe(sentinel);
+}
 function initRelatedScroll() {
   const plist = $("portraitRelatedList");
   if (!plist || plist.dataset.infinite) return;
   plist.dataset.infinite = "1";
-  /* sentinel at the end: when it nears the viewport, load more.
-     works no matter which element actually scrolls. */
-  let sentinel = $("relatedSentinel");
-  if (!sentinel) {
-    sentinel = document.createElement("div");
-    sentinel.id = "relatedSentinel";
-    sentinel.style.cssText = "height:2px;";
-    plist.appendChild(sentinel);
-  }
-  const io = new IntersectionObserver((entries) => {
-    if (entries[0].isIntersecting) loadMoreRelated();
-  }, { rootMargin: "400px" });
-  io.observe(sentinel);
+  ensureRelatedSentinel();
   /* keep old scroll listeners as fallback */
   const scroller = $("portraitRelated");
   if (scroller) scroller.addEventListener("scroll", checkRelatedScroll,
