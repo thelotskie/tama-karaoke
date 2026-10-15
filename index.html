@@ -193,7 +193,7 @@
   <div class="pbody">
     <div id="qlist"></div>
     <button id="skipbtn">Skip this song &#9199;</button>
-    <button id="clearbtn">&#128465; Clear queue</button>
+    <button id="clearbtn" onclick="clearQueue()">&#128465; Clear queue</button>
     <label id="autoplayRow"><input type="checkbox" id="autoplayChk" checked> Autoplay: play related when the queue runs out</label>
     <div style="margin-top:18px">
       <div class="sectitle">Related</div>
@@ -732,10 +732,20 @@ $("skipbtn").addEventListener("click", () => {
   if (ws && ws.readyState === 1)
     ws.send(JSON.stringify({ t: "control", action: "next" }));
 });
-$("clearbtn").addEventListener("click", () => {
-  if (ws && ws.readyState === 1)
+/* Clear queue: empties everything, stops playback, turns autoplay off.
+   Exposed globally (and via inline onclick) so it works even if a
+   listener fails to attach; gives visual feedback on tap. */
+window.clearQueue = function clearQueue() {
+  const btn = $("clearbtn");
+  if (btn) btn.textContent = "Clearing…";
+  if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify({ t: "clear" }));
-});
+  } else if (btn) {
+    btn.textContent = "⚠ Not connected";
+    setTimeout(() => { btn.innerHTML = "&#128465; Clear queue"; }, 2000);
+  }
+};
+$("clearbtn").addEventListener("click", window.clearQueue);
 
 /* ---------- start ---------- */
 let started = false;
