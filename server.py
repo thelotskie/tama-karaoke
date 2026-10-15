@@ -29,7 +29,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 44
+CODE_VERSION = 45
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -610,16 +610,16 @@ class Handler(BaseHTTPRequestHandler):
             if page_token:
                 # API pagination: proper next page
                 items, err, next_token = youtube_search(
-                    q, max_results=15, page_token=page_token)
+                    q, max_results=20, page_token=page_token)
             else:
                 # scrape: no token; fetch a larger batch once and slice
-                items, err, next_token = youtube_search(q, max_results=30)
+                items, err, next_token = youtube_search(q, max_results=40)
                 if offset:
-                    items = items[offset:offset + 15]
+                    items = items[offset:offset + 20]
                 else:
-                    # first page: 15 items; signal more if we got 30
-                    next_token = "scrape-more" if len(items) >= 30 else None
-                    items = items[:15]
+                    # first page: 20 items; signal more if we got 40
+                    next_token = "scrape-more" if len(items) >= 40 else None
+                    items = items[:20]
             body = json.dumps({"items": items, "error": err,
                                "nextPageToken": next_token}).encode("utf-8")
             self.send_response(200)

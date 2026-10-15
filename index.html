@@ -750,7 +750,7 @@ async function loadRelated(head) {
     const data = await r.json();
     list.innerHTML = "";
     if (plist) plist.innerHTML = "";
-    const items = (data.items || []).filter(it => it.videoId !== head.videoId).slice(0, 10);
+    const items = (data.items || []).filter(it => it.videoId !== head.videoId).slice(0, 20);
     lastRelated = items;
     if (!items.length) {
       const e2 = el("div", null, "No related videos found.");
