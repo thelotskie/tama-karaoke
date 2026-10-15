@@ -270,11 +270,21 @@ function openPanel(id) {
   document.querySelectorAll(".panel").forEach(p => p.classList.remove("open"));
   if (id) $(id).classList.add("open");
 }
+/* tapping the same button again closes its panel */
+function togglePanel(id) {
+  const el = $(id);
+  const wasOpen = el.classList.contains("open");
+  openPanel(null);
+  if (!wasOpen) {
+    el.classList.add("open");
+    if (id === "panel-remote") drawQR();
+  }
+}
 document.querySelectorAll("[data-close]").forEach(b =>
   b.addEventListener("click", () => openPanel(null)));
-$("btn-search").addEventListener("click", () => openPanel("panel-search"));
-$("btn-queue").addEventListener("click", () => openPanel("panel-queue"));
-$("btn-remote").addEventListener("click", () => { openPanel("panel-remote"); drawQR(); });
+$("btn-search").addEventListener("click", () => togglePanel("panel-search"));
+$("btn-queue").addEventListener("click", () => togglePanel("panel-queue"));
+$("btn-remote").addEventListener("click", () => togglePanel("panel-remote"));
 
 /* ---------- pairing QR ---------- */
 let qrDrawn = false;

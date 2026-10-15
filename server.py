@@ -18,6 +18,8 @@ import os
 import socket
 import struct
 import threading
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -232,6 +234,25 @@ def handle_message(c, msg):
 
 # ------------------------------------------------------------- youtube api
 
+def _get_json(url, tries=3):
+    """GET a JSON URL, retrying on HTTP 429 (YouTube rate limiting).
+    Returns (data, error)."""
+    last_err = None
+    for attempt in range(tries):
+        try:
+            with urllib.request.urlopen(url, timeout=12) as r:
+                return json.load(r), None
+        except urllib.error.HTTPError as e:
+            last_err = e
+            if e.code == 429 and attempt < tries - 1:
+                time.sleep(2 * (attempt + 1))  # 2s, then 4s
+                continue
+            return None, "youtube_error: %s" % e
+        except Exception as e:  # bad key, quota out, offline...
+            return None, "youtube_error: %s" % e
+    return None, "youtube_error: %s" % last_err
+
+
 def youtube_api(path, params):
     """Call a YouTube Data API endpoint. The list endpoints used here cost
     ~1 quota unit each (a search costs 100). Returns (data, error)."""
@@ -242,11 +263,7 @@ def youtube_api(path, params):
     params["key"] = key
     url = ("https://www.googleapis.com/youtube/v3/" + path + "?"
            + urllib.parse.urlencode(params))
-    try:
-        with urllib.request.urlopen(url, timeout=12) as r:
-            return json.load(r), None
-    except Exception as e:  # bad key, quota out, rate-limited, offline...
-        return None, "youtube_error: %s" % e
+    return _get_json(url)
 
 
 def channel_uploads(video_id, max_results=12):
@@ -320,11 +337,9 @@ def youtube_search(q, max_results=15):
         "key": key,
     })
     url = "https://www.googleapis.com/youtube/v3/search?" + params
-    try:
-        with urllib.request.urlopen(url, timeout=12) as r:
-            data = json.load(r)
-    except Exception as e:  # bad key, quota out, offline...
-        return [], "youtube_error: %s" % e
+    data, err = _get_json(url)
+    if err:
+        return [], err
     items = []
     for it in data.get("items", []):
         vid = (it.get("id") or {}).get("videoId")
