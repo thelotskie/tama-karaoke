@@ -352,10 +352,9 @@ function wirePlayerEvents() {
   });
   plyr.on("pause", () => {
     if (document.hidden && wantPlaying) {
-      /* YouTube auto-paused on hide — fight it back so audio continues */
-      setTimeout(() => {
-        if (wantPlaying && document.hidden && plyr && plyr.paused) safePlay();
-      }, 800);
+      /* YouTube auto-paused on hide — resume immediately. Timers get
+         throttled while the page is hidden, so waiting would stall. */
+      safePlay();
     } else {
       wantPlaying = false;
     }
