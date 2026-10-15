@@ -71,6 +71,7 @@ state_lock = threading.Lock()
 clients = []          # list of dicts: {sock, role, name, send_lock}
 queue = []            # list of dicts: {id, videoId, title, channel, thumb, by}
 queue_seq = 0
+autoplay_on = True    # shared autoplay switch (all screens stay in sync)
 
 def broadcast(obj, roles=None):
     """Send a JSON message to connected clients (optionally filtered by role)."""
@@ -89,7 +90,8 @@ def broadcast(obj, roles=None):
 def broadcast_queue():
     with state_lock:
         items = [dict(i) for i in queue]
-    broadcast({"t": "queue", "items": items})
+        ap = autoplay_on
+    broadcast({"t": "queue", "items": items, "autoplay": ap})
 
 def drop_client(c):
     with state_lock:
@@ -159,7 +161,7 @@ def ws_ping_all():
 # ------------------------------------------------------- message handling
 
 def handle_message(c, msg):
-    global queue_seq
+    global queue_seq, autoplay_on
     t = msg.get("t")
 
     if t == "search":
@@ -176,15 +178,21 @@ def handle_message(c, msg):
 
     elif t == "reserve":
         with state_lock:
-            queue_seq += 1
-            queue.append({
-                "id": "q%d" % queue_seq,
-                "videoId": msg.get("videoId", ""),
-                "title": msg.get("title", "Unknown"),
-                "channel": msg.get("channel", ""),
-                "thumb": msg.get("thumb", ""),
-                "by": c.get("name") or msg.get("by") or "screen",
-            })
+            vid = msg.get("videoId", "")
+            # autoplay race: two screens draining at once may both
+            # auto-reserve the same video — ignore the duplicate
+            if msg.get("auto") and any(i.get("videoId") == vid for i in queue):
+                pass
+            else:
+                queue_seq += 1
+                queue.append({
+                    "id": "q%d" % queue_seq,
+                    "videoId": vid,
+                    "title": msg.get("title", "Unknown"),
+                    "channel": msg.get("channel", ""),
+                    "thumb": msg.get("thumb", ""),
+                    "by": c.get("name") or msg.get("by") or "screen",
+                })
         broadcast_queue()
 
     elif t == "playnow":
@@ -206,6 +214,19 @@ def handle_message(c, msg):
         rid = msg.get("id")
         with state_lock:
             queue[:] = [i for i in queue if i["id"] != rid]
+        broadcast_queue()
+
+    elif t == "clear":
+        # empty the whole queue (stops the current song too); also turns
+        # autoplay off so it doesn't instantly refill
+        with state_lock:
+            queue.clear()
+            autoplay_on = False
+        broadcast_queue()
+
+    elif t == "autoplay":
+        with state_lock:
+            autoplay_on = bool(msg.get("on", True))
         broadcast_queue()
 
     elif t == "control":
@@ -567,8 +588,10 @@ def ws_hello_then_loop(c):
         # send current queue state to the newcomer
         with state_lock:
             items = [dict(i) for i in queue]
+            ap = autoplay_on
         try:
-            ws_send(c, json.dumps({"t": "queue", "items": items}))
+            ws_send(c, json.dumps({"t": "queue", "items": items,
+                                   "autoplay": ap}))
         except OSError:
             drop_client(c)
             return

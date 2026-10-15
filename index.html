@@ -124,6 +124,8 @@
     padding: 9px 14px; font-size: 13px; font-weight: 700; cursor: pointer; flex-shrink: 0; }
   #skipbtn { margin-top: 12px; width: 100%; padding: 12px; border-radius: 10px; border: none;
     background: #2b3a63; color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; }
+  #clearbtn { margin-top: 8px; width: 100%; padding: 12px; border-radius: 10px; border: none;
+    background: #5c1f2e; color: #ffb3c1; font-size: 15px; font-weight: 700; cursor: pointer; }
   /* remote / QR */
   #qrwrap { text-align: center; padding: 10px; }
   #qrbox img, #qrbox canvas, #qrbox table { margin: 0 auto; background: #fff;
@@ -191,6 +193,7 @@
   <div class="pbody">
     <div id="qlist"></div>
     <button id="skipbtn">Skip this song &#9199;</button>
+    <button id="clearbtn">&#128465; Clear queue</button>
     <label id="autoplayRow"><input type="checkbox" id="autoplayChk" checked> Autoplay: play related when the queue runs out</label>
     <div style="margin-top:18px">
       <div class="sectitle">Related</div>
@@ -321,13 +324,17 @@ function connect() {
   ws.onmessage = ev => {
     let m;
     try { m = JSON.parse(ev.data); } catch (e) { return; }
-    if (m.t === "queue") onQueue(m.items || []);
+    if (m.t === "queue") onQueue(m.items || [], m.autoplay);
     else if (m.t === "control") onControl(m.action);
   };
 }
 
-function onQueue(items) {
+function onQueue(items, autoplay) {
   queue = items;
+  if (typeof autoplay === "boolean" && autoplay !== serverAutoplay) {
+    serverAutoplay = autoplay;
+    syncAutoplayChk();
+  }
   renderQueue();
   const head = items[0];
   if (!head) {
@@ -478,10 +485,10 @@ function el(tag, cls, text) {
   return e;
 }
 /* one video row with a Reserve button — shared by search, recent, related */
-function reserveVideo(v, btn) {
+function reserveVideo(v, btn, auto) {
   if (ws && ws.readyState === 1)
     ws.send(JSON.stringify({ t: "reserve", videoId: v.videoId, title: v.title,
-      channel: v.channel, thumb: v.thumb, by: "screen" }));
+      channel: v.channel, thumb: v.thumb, by: "screen", auto: !!auto }));
   if (btn) { btn.textContent = "Reserved ✓"; btn.disabled = true; }
 }
 function videoCard(it) {
@@ -545,27 +552,31 @@ window.addEventListener("resize", applyScreenAppOrientation);
 window.addEventListener("orientationchange", applyScreenAppOrientation);
 
 /* ---------- autoplay: when the queue runs dry, play the next related ---------- */
+/* the switch lives on the server so all screens stay in sync */
+let serverAutoplay = true;
 let lastRelated = [];
-function autoplayOn() {
-  try { return localStorage.getItem("tama_autoplay") !== "off"; }
-  catch (e) { return true; }
-}
 function initAutoplay() {
   const chk = $("autoplayChk");
   if (!chk) return;
-  chk.checked = autoplayOn();
+  chk.checked = serverAutoplay;
   chk.addEventListener("change", () => {
-    try { localStorage.setItem("tama_autoplay", chk.checked ? "on" : "off"); }
-    catch (e) {}
+    if (ws && ws.readyState === 1)
+      ws.send(JSON.stringify({ t: "autoplay", on: chk.checked }));
+    else
+      chk.checked = serverAutoplay; // offline: revert
   });
 }
+function syncAutoplayChk() {
+  const chk = $("autoplayChk");
+  if (chk) chk.checked = serverAutoplay;
+}
 function maybeAutoplay() {
-  if (!autoplayOn() || !lastRelated.length) return;
+  if (!serverAutoplay || !lastRelated.length) return;
   const seen = {};
   recentPlayed.forEach(i => { seen[i.videoId] = 1; });
   const it = lastRelated.find(i => i.videoId && !seen[i.videoId]) || lastRelated[0];
   if (!it || !it.videoId) return;
-  reserveVideo(it, null);
+  reserveVideo(it, null, true);
   $("nowticker").textContent = "Autoplay ▶ " + it.title;
 }
 /* ---------- related videos (for the song now playing) ---------- */
@@ -705,6 +716,10 @@ function renderQueue() {
 $("skipbtn").addEventListener("click", () => {
   if (ws && ws.readyState === 1)
     ws.send(JSON.stringify({ t: "control", action: "next" }));
+});
+$("clearbtn").addEventListener("click", () => {
+  if (ws && ws.readyState === 1)
+    ws.send(JSON.stringify({ t: "clear" }));
 });
 
 /* ---------- start ---------- */
