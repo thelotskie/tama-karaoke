@@ -29,7 +29,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 23
+CODE_VERSION = 24
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -575,6 +575,8 @@ class Handler(BaseHTTPRequestHandler):
             channel = qs.get("channel", [""])[0].strip()
             title = qs.get("title", [""])[0].strip()
             smode = qs.get("smode", ["karaoke"])[0].strip()
+            more = qs.get("more", [""])[0].strip()
+            exclude = set(x for x in qs.get("exclude", [""])[0].split(",") if x)
             # related follows the search mode: normal -> plain videos,
             # karaoke -> karaoke versions
             k_suffix = "" if smode == "normal" else " karaoke"
@@ -618,6 +620,28 @@ class Handler(BaseHTTPRequestHandler):
                 items, err = youtube_search(
                     (channel + k_suffix).strip() if channel else "",
                     max_results=12)
+            if more and title:
+                # infinite scroll: try a fresh query variation for more videos
+                artist = _artist_from_title(title)
+                variants = [
+                    (artist + " live" + k_suffix).strip(),
+                    (artist + " acoustic" + k_suffix).strip(),
+                    (artist + " greatest hits" + k_suffix).strip(),
+                    (artist + " playlist" + k_suffix).strip(),
+                ] if artist else []
+                try:
+                    n = int(more)
+                except ValueError:
+                    n = 1
+                if 1 <= n <= len(variants):
+                    vitems, verr = _scrape_search(variants[n - 1],
+                                                 max_results=12)
+                    if vitems:
+                        items, err = vitems, verr
+            # drop already-shown videos (infinite scroll)
+            if exclude:
+                items = [it for it in items
+                         if it.get("videoId") not in exclude]
             body = json.dumps({"items": items, "error": err}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

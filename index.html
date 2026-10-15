@@ -625,6 +625,7 @@ function applyVideoLayout() {
 }
 window.addEventListener("resize", applyVideoLayout);
 applyVideoLayout();
+initRelatedScroll();
 
 /* ---------- autoplay: when the queue runs dry, play the next related ---------- */
 /* the switch lives on the server so all screens stay in sync */
@@ -684,11 +685,54 @@ async function loadRelated(head) {
       list.appendChild(videoCard(it));
       if (plist) plist.appendChild(videoCard(it));
     });
+    /* reset infinite scroll state for the new video */
+    relatedHead = head; relatedPage = 0; relatedDone = false;
   } catch (e) {
     list.innerHTML = "";
     const e2 = el("div", null, "Couldn't load related videos.");
     e2.id = "nores"; list.appendChild(e2);
   }
+}
+/* infinite scroll: load more related when reaching the bottom */
+let relatedHead = null, relatedPage = 0, relatedDone = false,
+    relatedLoading = false;
+async function loadMoreRelated() {
+  if (relatedLoading || relatedDone || !relatedHead) return;
+  relatedLoading = true;
+  relatedPage++;
+  try {
+    const exclude = lastRelated.map(it => it.videoId).join(",");
+    const r = await fetch("/api/related?videoId=" +
+      encodeURIComponent(relatedHead.videoId || "") +
+      "&channel=" + encodeURIComponent(relatedHead.channel || "") +
+      "&title=" + encodeURIComponent(relatedHead.title || "") +
+      "&smode=" + encodeURIComponent(searchMode()) +
+      "&more=" + relatedPage + "&exclude=" + encodeURIComponent(exclude));
+    const data = await r.json();
+    const items = (data.items || []).filter(it =>
+      it.videoId && !lastRelated.some(x => x.videoId === it.videoId));
+    const plist = $("portraitRelatedList");
+    if (!items.length) { relatedDone = true; }
+    else {
+      items.forEach(it => { if (plist) plist.appendChild(videoCard(it)); });
+      lastRelated.push(...items);
+    }
+  } catch (e) {}
+  relatedLoading = false;
+}
+function initRelatedScroll() {
+  const scroller = $("portraitRelated");
+  if (!scroller || scroller.dataset.infinite) return;
+  scroller.dataset.infinite = "1";
+  scroller.addEventListener("scroll", () => {
+    if (scroller.scrollTop + scroller.clientHeight >=
+        scroller.scrollHeight - 300) loadMoreRelated();
+  });
+  /* stacked (narrow) layout: the page itself scrolls */
+  window.addEventListener("scroll", () => {
+    if (window.innerHeight + window.scrollY >=
+        document.body.scrollHeight - 300) loadMoreRelated();
+  }, { passive: true });
 }
 /* ---------- search mode: normal / karaoke ---------- */
 function searchMode() {
