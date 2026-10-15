@@ -118,6 +118,13 @@
   #nores { color: #8b96bd; text-align: center; padding: 30px; }
   .card { display: flex; gap: 12px; align-items: center; padding: 10px;
     border-bottom: 1px solid #1a2440; }
+  /* related column cards: vertical — thumbnail on top, title below, buttons under */
+  #portraitRelated .card { display: block; padding: 10px 4px; }
+  #portraitRelated .card img { width: 100%; height: auto; aspect-ratio: 16 / 9; }
+  #portraitRelated .card .meta { margin: 8px 0; }
+  #portraitRelated .card .actions { display: flex; gap: 8px; }
+  #portraitRelated .card .actions .playnow,
+  #portraitRelated .card .actions .reserve { flex: 1; }
   .card img { width: 128px; height: 72px; object-fit: cover; border-radius: 8px;
     background: #111a33; flex-shrink: 0; }
   .card .meta { flex: 1; min-width: 0; }
