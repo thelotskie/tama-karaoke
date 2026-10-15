@@ -602,6 +602,8 @@ function playNowVideo(v, btn) {
     ws.send(JSON.stringify({ t: "playnow", videoId: v.videoId, title: v.title,
       channel: v.channel, thumb: v.thumb, by: "screen" }));
   if (btn) { btn.textContent = "Playing ▶"; btn.disabled = true; }
+  /* hide any open panel (search/queue) so the video is visible */
+  document.querySelectorAll(".panel").forEach(p => p.classList.remove("open"));
 }
 /* ---------- recently played (this screen, kept locally) ---------- */
 let recentPlayed = [];
