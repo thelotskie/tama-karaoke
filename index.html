@@ -28,6 +28,18 @@
   #logo { font-weight: 800; letter-spacing: 2px; font-size: 20px; color: #ffd166; }
   #nowticker { flex: 1; text-align: center; color: #aeb8d8; font-size: 14px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Screen-app portrait mode (page loaded with ?mode=screenapp on a portrait
+     screen): the video becomes a 16:9 block at the top and related videos
+     list below it instead of fullscreen. Landscape is unchanged. */
+  #portraitRelated { display: none; }
+  body.screenapp-portrait { display: flex; flex-direction: column;
+    height: 100%; overflow-y: auto; }
+  body.screenapp-portrait #topbar { position: static; order: 1; flex-shrink: 0; }
+  body.screenapp-portrait #ytwrap { position: relative; inset: auto; order: 2;
+    width: 100%; aspect-ratio: 16 / 9; flex-shrink: 0; }
+  body.screenapp-portrait #ytwrap:not(.on) { display: none; }
+  body.screenapp-portrait #portraitRelated { display: block; order: 3;
+    position: relative; z-index: 2; padding: 10px 12px 30px; }
   .tbtn { background: rgba(20,28,52,.85); color: #eef2ff; border: 1px solid #2b3a63;
     border-radius: 10px; padding: 9px 16px; font-size: 15px; cursor: pointer; }
   .tbtn:hover { background: #22305c; }
@@ -124,6 +136,11 @@
   <button class="tbtn collapsible" id="btn-search">&#128269; Search</button>
   <button class="tbtn collapsible" id="btn-queue">&#128203; Queue<span class="badge" id="qbadge" style="display:none">0</span></button>
   <button class="tbtn collapsible" id="btn-remote">&#128241; Remote</button>
+</div>
+
+<div id="portraitRelated">
+  <div class="sectitle">Related</div>
+  <div id="portraitRelatedList"></div>
 </div>
 
 <div class="panel" id="panel-search">
@@ -457,6 +474,17 @@ function renderRecent() {
   }
   recentPlayed.forEach(it => list.appendChild(videoCard(it)));
 }
+/* ---------- screen-app portrait mode (Karaoke Screen APK only) ---------- */
+const isScreenApp =
+  new URLSearchParams(location.search).get("mode") === "screenapp";
+function applyScreenAppOrientation() {
+  const portrait = window.matchMedia("(orientation: portrait)").matches;
+  document.body.classList.toggle("screenapp-portrait",
+    isScreenApp && portrait);
+}
+window.addEventListener("resize", applyScreenAppOrientation);
+window.addEventListener("orientationchange", applyScreenAppOrientation);
+
 /* ---------- autoplay: when the queue runs dry, play the next related ---------- */
 let lastRelated = [];
 function autoplayOn() {
@@ -484,7 +512,9 @@ function maybeAutoplay() {
 /* ---------- related videos (for the song now playing) ---------- */
 async function loadRelated(head) {
   const list = $("relatedList");
+  const plist = $("portraitRelatedList");
   list.innerHTML = "";
+  if (plist) plist.innerHTML = "";
   if (!head || !head.videoId) return;
   const d = el("div", null, "Loading related videos…");
   d.id = "nores"; list.appendChild(d);
@@ -492,13 +522,19 @@ async function loadRelated(head) {
     const r = await fetch("/api/related?channel=" + encodeURIComponent(head.channel || ""));
     const data = await r.json();
     list.innerHTML = "";
+    if (plist) plist.innerHTML = "";
     const items = (data.items || []).filter(it => it.videoId !== head.videoId).slice(0, 10);
     lastRelated = items;
     if (!items.length) {
       const e2 = el("div", null, "No related videos found.");
-      e2.id = "nores"; list.appendChild(e2); return;
+      e2.id = "nores"; list.appendChild(e2);
+      if (plist) { const p2 = e2.cloneNode(true); plist.appendChild(p2); }
+      return;
     }
-    items.forEach(it => list.appendChild(videoCard(it)));
+    items.forEach(it => {
+      list.appendChild(videoCard(it));
+      if (plist) plist.appendChild(videoCard(it));
+    });
   } catch (e) {
     list.innerHTML = "";
     const e2 = el("div", null, "Couldn't load related videos.");
@@ -623,6 +659,7 @@ $("startbtn").addEventListener("click", startApp);
 initSearchMode();
 initRecent();
 initAutoplay();
+applyScreenAppOrientation();
 showBg(true);
 /* the native screen app loads ?autostart=1 so no tap is needed */
 if (new URLSearchParams(location.search).get("autostart") === "1") startApp();
