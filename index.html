@@ -25,9 +25,18 @@
   #topbar.collapsed .collapsible { display: none; }
   #btn-collapse { pointer-events: auto; opacity: .55; padding: 9px 13px; }
   #topbar:not(.collapsed) #btn-collapse { opacity: 1; }
-  #logo { font-weight: 800; letter-spacing: 2px; font-size: 20px; color: #ffd166; }
   #nowticker { flex: 1; text-align: center; color: #aeb8d8; font-size: 14px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .tbtn { flex-shrink: 0; }
+  /* compact top bar on phones, portrait or landscape: smaller bar,
+     icon-only buttons so everything fits and stays tappable */
+  @media (max-width: 700px), (orientation: landscape) and (max-height: 500px) {
+    #topbar { padding: 6px 10px; gap: 6px; }
+    .tbtn { padding: 9px 12px; font-size: 14px; }
+    #btn-collapse { padding: 9px 12px; }
+    #nowticker { font-size: 12px; }
+    .tbtn .blabel { display: none; }
+  }
   /* Screen-app portrait mode (page loaded with ?mode=screenapp on a portrait
      screen): the video becomes a 16:9 block at the top and related videos
      list below it instead of fullscreen. Landscape is unchanged. */
@@ -131,11 +140,10 @@
 
 <div id="topbar">
   <button class="tbtn" id="btn-collapse" title="Hide menu">&lt;</button>
-  <div id="logo" class="collapsible">TAMA KARAOKE</div>
   <div id="nowticker" class="collapsible">Music from YouTube</div>
-  <button class="tbtn collapsible" id="btn-search">&#128269; Search</button>
-  <button class="tbtn collapsible" id="btn-queue">&#128203; Queue<span class="badge" id="qbadge" style="display:none">0</span></button>
-  <button class="tbtn collapsible" id="btn-remote">&#128241; Remote</button>
+  <button class="tbtn collapsible" id="btn-search">&#128269; <span class="blabel">Search</span></button>
+  <button class="tbtn collapsible" id="btn-queue">&#128203; <span class="blabel">Queue</span><span class="badge" id="qbadge" style="display:none">0</span></button>
+  <button class="tbtn collapsible" id="btn-remote">&#128241; <span class="blabel">Remote</span></button>
 </div>
 
 <div id="portraitRelated">
