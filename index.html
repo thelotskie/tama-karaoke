@@ -305,6 +305,8 @@ const BG_IMAGES = ["assets/songhub-bg-1.jpg", "assets/songhub-bg-2.jpg", "assets
 
 let ws = null, plyr = null;
 let queue = [], currentId = null, currentVideo = null, bgTimer = null, bgIdx = 0;
+let relatedIO = null; /* related sentinel observer (v46): declared up here
+  so initRelatedScroll() can use it during startup (TDZ fix, v47) */
 
 const $ = id => document.getElementById(id);
 const connstate = $("connstate");
@@ -819,8 +821,8 @@ function checkRelatedScroll() {
 }
 /* sentinel lives at the end of the related list; the observer fires
    no matter which element actually scrolls. v46: recreated after every
-   loadRelated, which used to wipe it and kill load-more on Android. */
-let relatedIO = null;
+   loadRelated, which used to wipe it and kill load-more on Android.
+   (relatedIO is declared at the top of the script — v47 TDZ fix.) */
 function ensureRelatedSentinel() {
   const plist = $("portraitRelatedList");
   if (!plist) return;
@@ -1040,7 +1042,7 @@ $("startbtn").addEventListener("click", startApp);
 initSearchMode();
 initRecent();
 initAutoplay();
-applyScreenAppOrientation();
+applyVideoLayout();
 showBg(true);
 /* the native screen app loads ?autostart=1 so no tap is needed */
 if (new URLSearchParams(location.search).get("autostart") === "1") startApp();
