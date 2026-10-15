@@ -235,6 +235,8 @@ var qrcode=function(){function i(t,r){function a(t,r){g=function(t){for(var r=ne
 "use strict";
 /* server.py replaces __WS_URL__ with ws://<lan-ip>:8765/ws */
 const WS_URL = "__WS_URL__";
+/* injected by server.py as a bare number; 0 when opened without the server */
+const CODE_VERSION = Number("__CODE_VERSION__") || 0;
 const BG_IMAGES = ["assets/songhub-bg-1.jpg", "assets/songhub-bg-2.jpg", "assets/songhub-bg-3.jpg"];
 
 let ws = null, plyr = null;
@@ -324,6 +326,16 @@ function connect() {
   ws.onmessage = ev => {
     let m;
     try { m = JSON.parse(ev.data); } catch (e) { return; }
+    if (typeof m.code_version === "number" && m.code_version > CODE_VERSION) {
+      /* server has newer code — reload (cache-busted) to pick it up */
+      try {
+        const u = new URL(location.href);
+        if (u.searchParams.get("v") === String(m.code_version)) return; // already tried
+        u.searchParams.set("v", m.code_version);
+        location.href = u.toString();
+      } catch (e) { location.reload(); }
+      return;
+    }
     if (m.t === "queue") onQueue(m.items || [], m.autoplay, m.drain);
     else if (m.t === "control") onControl(m.action);
   };

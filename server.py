@@ -28,6 +28,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+# bump on every deploy: clients auto-reload when the server has newer code
+CODE_VERSION = 6
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -102,7 +104,8 @@ def broadcast_queue():
             drain_seq += 1
         _drain_was_empty = is_empty
         drain = drain_seq
-    broadcast({"t": "queue", "items": items, "autoplay": ap, "drain": drain})
+    broadcast({"t": "queue", "items": items, "autoplay": ap, "drain": drain,
+               "code_version": CODE_VERSION})
 
 def drop_client(c):
     with state_lock:
@@ -562,6 +565,8 @@ class Handler(BaseHTTPRequestHandler):
         if rel == "index.html":
             # inject the pairing URL: public wss:// on Render, LAN ws:// at home
             body = body.replace(b"__WS_URL__", public_ws_url().encode("utf-8"))
+            # inject the code version so stale clients can auto-update
+            body = body.replace(b"__CODE_VERSION__", str(CODE_VERSION).encode("utf-8"))
         ext = os.path.splitext(rel)[1].lower()
         self.send_response(200)
         self.send_header("Content-Type", MIME.get(ext, "application/octet-stream"))
@@ -611,7 +616,8 @@ def ws_hello_then_loop(c):
             dr = drain_seq
         try:
             ws_send(c, json.dumps({"t": "queue", "items": items,
-                                   "autoplay": ap, "drain": dr}))
+                                   "autoplay": ap, "drain": dr,
+                                   "code_version": CODE_VERSION}))
         except OSError:
             drop_client(c)
             return
