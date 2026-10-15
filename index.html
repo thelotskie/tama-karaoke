@@ -866,9 +866,13 @@ async function doSearch() {
   const q = $("q").value.trim();
   const box = $("results");
   box.innerHTML = "";
+  /* reset pagination state */
+  searchQuery = q; searchToken = null; searchOffset = 0;
+  searchDone = false; searchLoading = false;
   if (!q) { $("recentBox").style.display = ""; return; }
   $("recentBox").style.display = "none";
   const query = searchMode() === "karaoke" ? q + " karaoke" : q;
+  searchQuery = query;
   box.appendChild(el("div", null, "Searching YouTube for “" + query + "”…")).id = "nores";
   let data;
   try {
@@ -912,7 +916,55 @@ async function doSearch() {
     const d = el("div", null, data.error ? "Search error: " + data.error : "No karaoke versions found.");
     d.id = "nores"; box.appendChild(d); return;
   }
+  searchToken = data.nextPageToken || null;
+  searchOffset = data.items.length;
+  if (!searchToken) searchDone = true;
   data.items.forEach(it => box.appendChild(videoCard(it)));
+  initSearchScroll();
+}
+/* search infinite scroll: sentinel at end of results */
+let searchQuery = "", searchToken = null, searchOffset = 0,
+    searchLoading = false, searchDone = false;
+async function loadMoreSearch() {
+  if (searchLoading || searchDone || !searchQuery) return;
+  searchLoading = true;
+  try {
+    let url = "/api/search?q=" + encodeURIComponent(searchQuery);
+    if (searchToken && searchToken !== "scrape-more")
+      url += "&pageToken=" + encodeURIComponent(searchToken);
+    else if (searchToken === "scrape-more")
+      url += "&offset=" + searchOffset;
+    else return;
+    const r = await fetch(url);
+    const data = await r.json();
+    const box = $("results");
+    const sentinel = $("searchSentinel");
+    (data.items || []).forEach(it => {
+      const card = videoCard(it);
+      if (sentinel) box.insertBefore(card, sentinel);
+      else box.appendChild(card);
+    });
+    searchOffset += (data.items || []).length;
+    searchToken = data.nextPageToken || null;
+    if (!searchToken || !(data.items || []).length) searchDone = true;
+  } catch (e) {}
+  searchLoading = false;
+}
+function initSearchScroll() {
+  const box = $("results");
+  if (!box || box.dataset.infinite) return;
+  box.dataset.infinite = "1";
+  let sentinel = $("searchSentinel");
+  if (!sentinel) {
+    sentinel = document.createElement("div");
+    sentinel.id = "searchSentinel";
+    sentinel.style.cssText = "height:2px;";
+    box.appendChild(sentinel);
+  }
+  const io = new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting) loadMoreSearch();
+  }, { rootMargin: "400px" });
+  io.observe(sentinel);
 }
 $("gosearch").addEventListener("click", doSearch);
 $("q").addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });

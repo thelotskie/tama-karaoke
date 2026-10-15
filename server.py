@@ -29,7 +29,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 42
+CODE_VERSION = 43
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -475,13 +475,13 @@ def _scrape_search(q, max_results=15):
     return out, None
 
 
-def _api_search(q, max_results=15):
-    """Search YouTube for q. Returns (items, error)."""
+def _api_search(q, max_results=15, page_token=None):
+    """Search YouTube for q. Returns (items, error, next_page_token)."""
     key = load_key()
     if not key:
-        return [], "no_key"
+        return [], "no_key", None
     if not q:
-        return [], None
+        return [], None, None
     params = urllib.parse.urlencode({
         "part": "snippet",
         "type": "video",
@@ -490,11 +490,11 @@ def _api_search(q, max_results=15):
         "order": "relevance",
         "q": q,
         "key": key,
-    })
+    } | ({"pageToken": page_token} if page_token else {}))
     url = "https://www.googleapis.com/youtube/v3/search?" + params
     data, err = _get_json(url)
     if err:
-        return [], err
+        return [], err, None
     items = []
     for it in data.get("items", []):
         vid = (it.get("id") or {}).get("videoId")
@@ -513,7 +513,7 @@ def _api_search(q, max_results=15):
             "views": "",
             "published": pub,
         })
-    return items, None
+    return items, None, data.get("nextPageToken")
 
 
 def _rel_time(iso):
@@ -551,14 +551,16 @@ def _key_limited(err):
                           or "quota" in err.lower())
 
 
-def youtube_search(q, max_results=15):
+def youtube_search(q, max_results=15, page_token=None):
     """Search YouTube for q. API key first (reliable, structured); falls
     back to the no-key website scrape when the key can't serve.
-    Returns (items, error)."""
-    items, err = _api_search(q, max_results)
+    Returns (items, error, next_page_token). Scrape has no pagination —
+    next_page_token is None for scrape results."""
+    items, err, token = _api_search(q, max_results, page_token)
     if _key_limited(err):
-        return _scrape_search(q, max_results)
-    return items, err
+        sitems, serr = _scrape_search(q, max_results)
+        return sitems, serr, None
+    return items, err, token
 
 # ------------------------------------------------------------- http server
 
@@ -598,9 +600,28 @@ class Handler(BaseHTTPRequestHandler):
 
         # --- youtube search proxy (q= text query) ---
         if parsed.path == "/api/search":
-            q = urllib.parse.parse_qs(parsed.query).get("q", [""])[0]
-            items, err = youtube_search(q)
-            body = json.dumps({"items": items, "error": err}).encode("utf-8")
+            qs = urllib.parse.parse_qs(parsed.query)
+            q = qs.get("q", [""])[0]
+            page_token = qs.get("pageToken", [""])[0] or None
+            try:
+                offset = int(qs.get("offset", ["0"])[0] or 0)
+            except ValueError:
+                offset = 0
+            if page_token:
+                # API pagination: proper next page
+                items, err, next_token = youtube_search(
+                    q, max_results=15, page_token=page_token)
+            else:
+                # scrape: no token; fetch a larger batch once and slice
+                items, err, next_token = youtube_search(q, max_results=30)
+                if offset:
+                    items = items[offset:offset + 15]
+                else:
+                    # first page: 15 items; signal more if we got 30
+                    next_token = "scrape-more" if len(items) >= 30 else None
+                    items = items[:15]
+            body = json.dumps({"items": items, "error": err,
+                               "nextPageToken": next_token}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
