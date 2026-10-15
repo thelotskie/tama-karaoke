@@ -385,7 +385,9 @@ function playVideo(v) {
   plyr = new Plyr("#plyr", {
     autoplay: true,
     controls: ["play-large", "play", "progress", "current-time",
-               "mute", "volume", "fullscreen"],
+               "mute", "volume", "settings", "fullscreen"],
+    settings: ["speed"],
+    speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
     youtube: { rel: 0, modestbranding: 1, iv_load_policy: 3 }
   });
   wirePlayerEvents();
