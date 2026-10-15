@@ -324,10 +324,10 @@ async function doSearch() {
       "Add a key to yt_key.txt (home PC) or the YT_API_KEY setting (test link) to unlock search. " +
       "Meanwhile, try the demo song below:";
     /* demo fallback: one known karaoke video, playable with zero setup */
-    const demo = { videoId: "aFpj_kRkdHg",
+    const demo = { videoId: "xyF04rAhHaQ",
       title: "Queen - Bohemian Rhapsody (Karaoke)",
-      channel: "karaoke SESH",
-      thumb: "https://i.ytimg.com/vi/aFpj_kRkdHg/mqdefault.jpg" };
+      channel: "Starlight Karaoke",
+      thumb: "https://i.ytimg.com/vi/xyF04rAhHaQ/mqdefault.jpg" };
     const card = el("div", "card");
     const img = el("img"); img.src = demo.thumb; img.alt = "";
     const meta = el("div", "meta");
@@ -402,13 +402,18 @@ $("skipbtn").addEventListener("click", () => {
 });
 
 /* ---------- start ---------- */
-$("startbtn").addEventListener("click", () => {
+let started = false;
+function startApp() {
+  if (started) return;
+  started = true;
   $("gate").style.display = "none";
   initPlayer();
   connect();
-  showBg(true);
-});
+}
+$("startbtn").addEventListener("click", startApp);
 showBg(true);
+/* the native screen app loads ?autostart=1 so no tap is needed */
+if (new URLSearchParams(location.search).get("autostart") === "1") startApp();
 </script>
 </body>
 </html>
