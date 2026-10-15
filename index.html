@@ -299,8 +299,8 @@ function onQueue(items) {
 
 function onControl(action) {
   if (!plyr) return;
-  if (action === "pause") plyr.pause();
-  else if (action === "resume") plyr.play();
+  if (action === "pause") window.tamaPause();
+  else if (action === "resume") window.tamaPlay();
   /* "next" arrives as a fresh queue message; nothing to do here */
 }
 
@@ -313,16 +313,52 @@ function reportNow(videoId, title, state) {
    Plyr only initializes an embed when the target carries
    data-plyr-provider / data-plyr-embed-id, so we rebuild the
    embed node for every song instead of reusing one bare div. */
+
+/* Background audio: YouTube auto-pauses the moment the page is hidden
+   (screen off / app switched). wantPlaying tracks whether audio SHOULD
+   be playing; when YouTube pauses us while hidden, we nudge it back.
+   The native Screen app drives these via its notification buttons. */
+let wantPlaying = false;
+function safePlay() {
+  if (!plyr) return;
+  try {
+    const p = plyr.play();
+    if (p && p.catch) p.catch(() => {});
+  } catch (e) {}
+}
+window.tamaPlay = function () { wantPlaying = true; safePlay(); };
+window.tamaPause = function () {
+  wantPlaying = false;
+  try { if (plyr) plyr.pause(); } catch (e) {}
+};
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && wantPlaying) {
+    setTimeout(() => {
+      if (wantPlaying && document.hidden && plyr && plyr.paused) safePlay();
+    }, 700);
+  }
+});
+
 function wirePlayerEvents() {
   plyr.on("ended", () => {
+    wantPlaying = false;
     if (currentId && ws && ws.readyState === 1)
       ws.send(JSON.stringify({ t: "ended", id: currentId }));
   });
   plyr.on("playing", () => {
+    wantPlaying = true;
     showBg(false);
     if (currentVideo) reportNow(currentVideo.videoId, currentVideo.title, "playing");
   });
   plyr.on("pause", () => {
+    if (document.hidden && wantPlaying) {
+      /* YouTube auto-paused on hide — fight it back so audio continues */
+      setTimeout(() => {
+        if (wantPlaying && document.hidden && plyr && plyr.paused) safePlay();
+      }, 800);
+    } else {
+      wantPlaying = false;
+    }
     if (currentVideo) reportNow(currentVideo.videoId, currentVideo.title, "paused");
   });
   plyr.on("error", () => {
