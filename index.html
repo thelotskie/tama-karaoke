@@ -482,6 +482,20 @@ function reportProgress(force) {
 setInterval(() => reportProgress(false), 10000);
 window.addEventListener("beforeunload", () => reportProgress(true));
 
+/* proactive version check: the websocket only pushes code_version on messages,
+   so an idle page would never learn a new deploy exists. poll instead. */
+function checkVersion() {
+  fetch("api/version", { cache: "no-store" }).then(r => r.json()).then(d => {
+    if (typeof d.code_version === "number" && d.code_version > CODE_VERSION) {
+      const u = new URL(location.href);
+      u.searchParams.set("v", d.code_version + "_" + Date.now());
+      location.href = u.toString();
+    }
+  }).catch(() => {});
+}
+setInterval(checkVersion, 60000);
+setTimeout(checkVersion, 15000);
+
 function playVideo(v) {
   if (!/^[A-Za-z0-9_-]{11}$/.test(v.videoId || "")) return;
   try { if (plyr) plyr.destroy(); } catch (e) {}

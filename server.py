@@ -29,7 +29,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 16
+CODE_VERSION = 17
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -541,6 +541,16 @@ class Handler(BaseHTTPRequestHandler):
         # --- websocket upgrade ---
         if parsed.path == "/ws":
             self.handle_ws()
+            return
+
+        # --- code version for proactive client auto-update polling ---
+        if parsed.path == "/api/version":
+            body = json.dumps({"code_version": CODE_VERSION}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
 
         # --- youtube search proxy (q= text query) ---
