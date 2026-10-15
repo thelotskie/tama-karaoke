@@ -49,11 +49,7 @@
   /* narrow screens: stack video cards (thumb+title on top, buttons full
      width below) so titles and buttons never overlap */
   @media (max-width: 700px) {
-    .card { flex-wrap: wrap; }
-    .card img { width: 120px; height: 68px; }
-    .card .meta { flex: 1; min-width: 140px; }
-    .card .actions { flex: 1 1 100%; }
-    .card .actions .playnow, .card .actions .reserve { flex: 1; padding: 10px 8px; }
+    .card .actions .playnow, .card .actions .reserve { padding: 10px 8px; }
   }
     #topbar { padding: 6px 10px; gap: 6px; }
     .tbtn { padding: 9px 12px; font-size: 14px; }
@@ -76,13 +72,14 @@
     position: relative; z-index: 2; padding: 10px 12px 40px;
     max-width: 1280px; margin: 0 auto; width: 100%; }
   /* narrow screens: pin the video to the top while related scrolls under it.
-     topbar stays fixed so buttons are always reachable. */
+     topbar stays fixed so buttons are always reachable; video offset uses
+     the measured topbar height (--topbar-h). */
   @media (max-width: 899px) {
-    body.has-video { padding-top: 62px; }
+    body.has-video { padding-top: var(--topbar-h, 60px); }
     body.has-video #topbar { position: fixed; top: 0; left: 0; right: 0;
-      z-index: 10; }
-    body.has-video #ytwrap { position: sticky; top: 62px; z-index: 5;
-      background: #000; }
+      z-index: 10; background: #0a0f1e; }
+    body.has-video #ytwrap { position: sticky; top: var(--topbar-h, 60px);
+      z-index: 5; background: #000; margin-top: 0; }
   }
   /* desktop web: video left, related right with its own scroll (video stays put) */
   @media (min-width: 900px) {
@@ -129,23 +126,17 @@
   #moderow label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
   #moderow input { accent-color: #ffd166; width: 16px; height: 16px; }
   #nores { color: #8b96bd; text-align: center; padding: 30px; }
-  .card { display: flex; gap: 12px; align-items: center; padding: 10px;
+  .card { display: block; padding: 10px 4px;
     border-bottom: 1px solid #1a2440; }
-  /* related column cards: vertical — thumbnail on top, title below, buttons under */
-  #portraitRelated .card { display: block; padding: 10px 4px; }
-  #portraitRelated .card img { width: 100%; height: auto; aspect-ratio: 16 / 9; }
-  #portraitRelated .card .meta { margin: 8px 0; }
-  #portraitRelated .card .actions { display: flex; gap: 8px; }
-  #portraitRelated .card .actions .playnow,
-  #portraitRelated .card .actions .reserve { flex: 1; }
-  .card img { width: 128px; height: 72px; object-fit: cover; border-radius: 8px;
-    background: #111a33; flex-shrink: 0; }
-  .card .meta { flex: 1; min-width: 0; }
+  .card img { width: 100%; height: auto; aspect-ratio: 16 / 9;
+    object-fit: cover; border-radius: 8px; background: #111a33; }
+  .card .meta { margin: 8px 0; min-width: 0; }
   .card .t { font-size: 15px; font-weight: 600; }
   .card .c { font-size: 13px; color: #8b96bd; margin-top: 4px; }
+  .card .actions { display: flex; gap: 8px; }
+  .card .actions .playnow, .card .actions .reserve { flex: 1; }
   .reserve { background: #06d6a0; color: #03231a; border: none; border-radius: 10px;
-    padding: 10px 18px; font-size: 14px; font-weight: 700; cursor: pointer; flex-shrink: 0; }
-  .card .actions { display: flex; gap: 8px; flex-shrink: 0; }
+    padding: 10px 18px; font-size: 14px; font-weight: 700; cursor: pointer; }
   .playnow { background: #ffd166; color: #201500; border: none; border-radius: 10px;
     padding: 10px 18px; font-size: 14px; font-weight: 700; cursor: pointer; flex-shrink: 0; }
   .playnow:disabled, .reserve:disabled { opacity: .55; cursor: default; }
@@ -645,8 +636,14 @@ function renderRecent() {
    video becomes a 16:9 block on top, related videos list below it. */
 function applyVideoLayout() {
   /* when a video is playing: video on top, related below, page scrolls */
-  document.body.classList.toggle("has-video",
-    document.getElementById("ytwrap").classList.contains("on"));
+  const hasVideo =
+    document.getElementById("ytwrap").classList.contains("on");
+  document.body.classList.toggle("has-video", hasVideo);
+  /* measure topbar so the sticky video sits exactly below it (narrow) */
+  if (hasVideo && window.innerWidth < 900) {
+    const h = document.getElementById("topbar").offsetHeight || 60;
+    document.body.style.setProperty("--topbar-h", h + "px");
+  }
 }
 window.addEventListener("resize", applyVideoLayout);
 applyVideoLayout();
