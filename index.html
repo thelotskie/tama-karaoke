@@ -28,7 +28,17 @@
     /* bigger controls for TV/monitor viewing from a distance */
     --plyr-control-icon-size: 22px;
     --plyr-control-spacing: 14px;
-    --plyr-font-size-time: 15px; }
+    --plyr-font-size-time: 15px;
+    /* v49: chunkier time bar + volume slider for touch */
+    --plyr-range-track-height: 7px;
+    --plyr-range-thumb-height: 16px; }
+  /* volume slider: always visible, wide enough to grab on a phone,
+     stays open (no auto-hide) */
+  .plyr__volume input[type="range"] {
+    min-width: 84px !important; max-width: 110px !important;
+    margin-left: 8px !important; }
+  /* time bar: taller touch target */
+  .plyr--video .plyr__progress input[type="range"] { height: 28px; }
   .plyr { background: #000; }
   /* top bar */
   #topbar { position: fixed; top: 0; left: 0; right: 0; z-index: 10; display: flex;
