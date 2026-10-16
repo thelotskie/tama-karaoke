@@ -39,6 +39,11 @@
     margin-left: 8px !important; }
   /* time bar: taller touch target */
   .plyr--video .plyr__progress input[type="range"] { height: 28px; }
+  /* v50: in the APK (mode=screenapp) portrait mode, hide the volume
+     slider entirely — the time bar stays visible */
+  @media (orientation: portrait) {
+    body.screenapp .plyr__volume { display: none !important; }
+  }
   .plyr { background: #000; }
   /* top bar */
   #topbar { position: fixed; top: 0; left: 0; right: 0; z-index: 10; display: flex;
@@ -1059,6 +1064,10 @@ $("startbtn").addEventListener("click", startApp);
 initSearchMode();
 initRecent();
 initAutoplay();
+/* v50: flag the native APK (it loads ?mode=screenapp) so CSS can
+   hide the volume slider in portrait */
+if (new URLSearchParams(location.search).get("mode") === "screenapp")
+  document.body.classList.add("screenapp");
 applyVideoLayout();
 showBg(true);
 /* the native screen app loads ?autostart=1 so no tap is needed */
