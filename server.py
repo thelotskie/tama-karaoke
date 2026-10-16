@@ -15,6 +15,8 @@ import base64
 import hashlib
 import json
 import os
+import re
+import random
 import socket
 import struct
 import threading
@@ -29,7 +31,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 47
+CODE_VERSION = 48
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -325,12 +327,47 @@ def youtube_api(path, params):
 
 
 def _artist_from_title(title):
-    """Best-effort artist extraction from 'Artist - Song (...)' style titles.
-    Returns "" when no artist separator is found."""
+    """Best-effort artist extraction from video titles.
+    Handles 'Artist - Song', 'Song - Karaoke - Artist' (artist last),
+    and 'Song by Artist'. Returns "" when no artist can be found."""
     t = (title or "").strip()
     for sep in (" - ", " – ", " — "):
         if sep in t:
-            return t.split(sep, 1)[0].strip()
+            parts = [p.strip() for p in t.split(sep) if p.strip()]
+            if not parts:
+                return ""
+            # "Song - Karaoke Version - Artist" / "Song (Karaoke) - Artist" /
+            # "Karaoke - Artist - Song": the artist follows the karaoke label
+            if "karaoke" in parts[0].lower():
+                idx = 1 if parts[0].strip().lower() == "karaoke" and \
+                    len(parts) >= 3 else -1
+                cand = re.sub(r"\s*\(.*?\)\s*$", "",
+                              parts[idx]).strip()
+                if cand and "karaoke" not in cand.lower():
+                    return cand
+                return ""
+            if len(parts) >= 3 and any("karaoke" in p.lower()
+                                       for p in parts[1:-1]):
+                cand = re.sub(r"\s*\(.*?\)\s*$", "", parts[-1]).strip()
+                if cand and "karaoke" not in cand.lower():
+                    return cand
+                return ""
+            cand = parts[0]
+            if "karaoke" not in cand.lower():
+                return cand
+            return ""
+    # "Artist: Song (…)" format
+    if ":" in t:
+        cand = t.split(":", 1)[0].strip()
+        if cand and "karaoke" not in cand.lower() and len(cand) < 40:
+            return cand
+    # "Song by Artist (…)" format
+    low = t.lower()
+    if " by " in low:
+        cand = t[low.rindex(" by ") + 4:].strip()
+        cand = re.sub(r"\s*\(.*?\)\s*$", "", cand).strip()
+        if cand and "karaoke" not in cand.lower():
+            return cand
     return ""
 
 
@@ -693,7 +730,6 @@ class Handler(BaseHTTPRequestHandler):
                             if len(items) >= 12:
                                 break
                     # mix up the order so it's not just top search hits
-                    import random
                     random.shuffle(items)
             if not items and video_id:
                 # fallback: latest uploads from the same channel (~3 units)
@@ -713,13 +749,28 @@ class Handler(BaseHTTPRequestHandler):
                 # videos — wraps around so it keeps going; exclude filters
                 # already-shown so we never repeat
                 artist = _artist_from_title(title)
-                base_variants = [
-                    " live", " acoustic", " greatest hits", " playlist",
-                    " unplugged", " cover", " official video", " top songs",
-                    " best of", " live performance",
-                ]
-                variants = [(artist + v + k_suffix).strip()
-                            for v in base_variants] if artist else []
+                # v48: when no artist is in the title ("Song (Karaoke)"
+                # style uploads), fall back to the channel — a karaoke
+                # channel's catalog is different songs in the same genre,
+                # so load-more doesn't die after the first batch
+                if artist:
+                    base = artist
+                    base_variants = [
+                        " live", " acoustic", " greatest hits",
+                        " playlist", " unplugged", " cover",
+                        " official video", " top songs", " best of",
+                        " live performance",
+                    ]
+                elif channel:
+                    base = channel
+                    base_variants = [
+                        "", " greatest hits", " playlist", " best of",
+                        " top songs",
+                    ]
+                else:
+                    base, base_variants = "", []
+                variants = [(base + v + k_suffix).strip()
+                            for v in base_variants] if base else []
                 try:
                     n = int(more)
                 except ValueError:
@@ -742,7 +793,6 @@ class Handler(BaseHTTPRequestHandler):
                 core_l = core.lower()
                 items = [it for it in items
                          if core_l not in (it.get("title") or "").lower()]
-                import random
                 random.shuffle(items)
             body = json.dumps({"items": items, "error": err}).encode("utf-8")
             self.send_response(200)

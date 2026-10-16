@@ -767,6 +767,7 @@ async function loadRelated(head) {
     ensureRelatedSentinel(); /* re-add after the wipe above */
     /* reset infinite scroll state for the new video */
     relatedHead = head; relatedPage = 0; relatedDone = false;
+    relatedEmptyPages = 0;
   } catch (e) {
     list.innerHTML = "";
     const e2 = el("div", null, "Couldn't load related videos.");
@@ -775,7 +776,7 @@ async function loadRelated(head) {
 }
 /* infinite scroll: load more related when reaching the bottom */
 let relatedHead = null, relatedPage = 0, relatedDone = false,
-    relatedLoading = false;
+    relatedLoading = false, relatedEmptyPages = 0;
 async function loadMoreRelated() {
   if (relatedLoading || relatedDone || !relatedHead) return;
   relatedLoading = true;
@@ -793,8 +794,14 @@ async function loadMoreRelated() {
       it.videoId && !lastRelated.some(x => x.videoId === it.videoId));
     const plist = $("portraitRelatedList");
     const sentinel = $("relatedSentinel");
-    if (!items.length) { relatedDone = true; }
+    /* v48: only give up after 2 straight empty pages, so one failed
+       scrape doesn't permanently kill load-more */
+    if (!items.length) {
+      relatedEmptyPages++;
+      if (relatedEmptyPages >= 2) relatedDone = true;
+    }
     else {
+      relatedEmptyPages = 0;
       items.forEach(it => {
         const card = videoCard(it);
         /* keep the sentinel last so it keeps triggering */
