@@ -31,7 +31,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 50
+CODE_VERSION = 51
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -504,9 +504,12 @@ def _scrape_search(q, max_results=15):
             views = (vr.get("viewCountText", {}).get("simpleText") or "")
             published = (vr.get("publishedTimeText", {}).get("simpleText")
                          or "")
+            # v51: video length ("3:45") for the thumbnail badge
+            duration = (vr.get("lengthText", {}).get("simpleText") or "")
             out.append({"videoId": vid, "title": title,
                         "channel": ch, "thumb": thumb,
-                        "views": views, "published": published})
+                        "views": views, "published": published,
+                        "duration": duration})
             if len(out) >= max_results:
                 return out, None
     return out, None
@@ -549,8 +552,36 @@ def _api_search(q, max_results=15, page_token=None):
             "thumb": thumb,
             "views": "",
             "published": pub,
+            "duration": "",
         })
+    # v51: fetch durations in one videos.list call (1 quota unit for 50 ids)
+    if items and key:
+        vids = ",".join(it["videoId"] for it in items)
+        durl = ("https://www.googleapis.com/youtube/v3/videos?" +
+                urllib.parse.urlencode({"part": "contentDetails",
+                                        "id": vids, "key": key}))
+        ddata, derr = _get_json(durl)
+        if not derr:
+            for it in ddata.get("items", []):
+                dur = _iso_duration((it.get("contentDetails") or {})
+                                    .get("duration", ""))
+                for vi in items:
+                    if vi["videoId"] == it.get("id"):
+                        vi["duration"] = dur
+                        break
     return items, None, data.get("nextPageToken")
+
+
+def _iso_duration(iso):
+    """'PT3M45S' -> '3:45' for the thumbnail badge."""
+    m = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", iso or "")
+    if not m:
+        return ""
+    h, mn, s = (int(m.group(1) or 0), int(m.group(2) or 0),
+                int(m.group(3) or 0))
+    if h:
+        return "%d:%02d:%02d" % (h, mn, s)
+    return "%d:%02d" % (mn, s)
 
 
 def _rel_time(iso):

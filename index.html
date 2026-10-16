@@ -165,6 +165,10 @@
     cursor: pointer; display: flex; align-items: center; justify-content: center; }
   .card .iconbtn.done { background: rgba(255,209,102,.95); }
   .card .iconbtn:disabled { cursor: default; }
+  /* v51: video duration badge, bottom-right of thumbnail (YouTube style) */
+  .card .dur { position: absolute; right: 6px; bottom: 6px;
+    background: rgba(0,0,0,.82); color: #fff; font-size: 12px; font-weight: 600;
+    padding: 2px 6px; border-radius: 4px; pointer-events: none; }
   .card .meta { margin: 8px 0; min-width: 0; }
   .card .t { font-size: 15px; font-weight: 600; }
   .card .c { font-size: 13px; color: #8b96bd; margin-top: 4px; }
@@ -490,6 +494,7 @@ function reportNow(videoId, title, state) {
    The native Screen app drives these via its notification buttons. */
 let wantPlaying = false;
 let pendingSeek = 0; // resume position for the song now starting
+let userPausedAt = 0; // v51: timestamp of last manual pause (notification)
 function safePlay() {
   if (!plyr) return;
   try {
@@ -500,12 +505,23 @@ function safePlay() {
 window.tamaPlay = function () { wantPlaying = true; safePlay(); };
 window.tamaPause = function () {
   wantPlaying = false;
-  try { if (plyr) plyr.pause(); } catch (e) {}
+  userPausedAt = Date.now();
+  /* v51: pause, then verify it took — retry twice in case the YouTube
+     embed shrugs off the first call (the reported "pause doesn't pause") */
+  const tryPause = () => {
+    try { if (plyr && !plyr.paused) plyr.pause(); } catch (e) {}
+  };
+  tryPause();
+  setTimeout(tryPause, 600);
+  setTimeout(tryPause, 1600);
 };
+/* v51: the auto-resume fight-back must never undo a manual pause */
+function manualPauseRecent() { return Date.now() - userPausedAt < 4000; }
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden && wantPlaying) {
+  if (document.hidden && wantPlaying && !manualPauseRecent()) {
     setTimeout(() => {
-      if (wantPlaying && document.hidden && plyr && plyr.paused) safePlay();
+      if (wantPlaying && !manualPauseRecent() &&
+          document.hidden && plyr && plyr.paused) safePlay();
     }, 700);
   }
 });
@@ -533,7 +549,7 @@ function wirePlayerEvents() {
   });
   plyr.on("pause", () => {
     reportProgress(true);
-    if (document.hidden && wantPlaying) {
+    if (document.hidden && wantPlaying && !manualPauseRecent()) {
       /* YouTube auto-paused on hide — resume immediately. Timers get
          throttled while the page is hidden, so waiting would stall. */
       safePlay();
@@ -657,6 +673,8 @@ function videoCard(it) {
   setRsvIcon(rsv, queue.some(q => q.videoId === it.videoId));
   rsv.addEventListener("click", (e) => { e.stopPropagation(); reserveVideo(it, rsv); });
   thumbwrap.appendChild(rsv);
+  /* v51: duration badge ("3:45") bottom-right of the thumbnail */
+  if (it.duration) thumbwrap.appendChild(el("span", "dur", it.duration));
   const meta = el("div", "meta");
   meta.appendChild(el("div", "t", it.title));
   /* YouTube style: "Channel • 1.2M views • 2 days ago" */
