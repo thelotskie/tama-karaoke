@@ -1108,6 +1108,7 @@ $("clearbtn").addEventListener("click", window.clearQueue);
 let chatHistory = [];
 function chatAdd(role, text) {
   const box = $("chatmsgs");
+  /* render ```code blocks``` as monospace, rest as plain text */
   const d = el("div", "cmsg " + (role === "user" ? "user" : "tama"));
   /* render ```code blocks``` as monospace, rest as plain text */
   const parts = String(text).split(/```/);
@@ -1124,6 +1125,8 @@ function chatAdd(role, text) {
   box.scrollTop = box.scrollHeight;
   return d;
 }
+/* wire chat buttons after DOM is ready (button HTML comes after this script) */
+document.addEventListener("DOMContentLoaded", () => {
 $("chatfab").addEventListener("click", () => {
   const p = $("chatpanel");
   p.classList.toggle("open");
@@ -1132,6 +1135,9 @@ $("chatfab").addEventListener("click", () => {
 });
 $("chatclose").addEventListener("click", () =>
   $("chatpanel").classList.remove("open"));
+$("chatsend").addEventListener("click", sendChat);
+$("chatinput").addEventListener("keydown", e => { if (e.key === "Enter") sendChat(); });
+});
 async function chatActOnDirective(query, action) {
   /* [[play: x]] / [[reserve: x]] -> search top hit, then play/reserve it */
   try {
