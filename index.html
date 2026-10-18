@@ -141,6 +141,37 @@
   .pbody { padding: 16px 18px; overflow-y: auto; flex: 1; }
   .phead { padding: 14px 18px; border-bottom: 1px solid #22305c;
     flex-shrink: 0; }
+  /* Tama AI chat */
+  #chatfab { position: fixed; right: 18px; bottom: 18px; z-index: 60;
+    width: 56px; height: 56px; border-radius: 50%; border: none;
+    background: #ffd166; font-size: 26px; cursor: pointer;
+    box-shadow: 0 4px 18px rgba(0,0,0,.5); }
+  #chatpanel { position: fixed; right: 18px; bottom: 86px; z-index: 60;
+    width: min(360px, calc(100vw - 36px)); height: min(480px, 60vh);
+    background: rgba(8,12,24,.97); border: 1px solid #2b3a63;
+    border-radius: 16px; display: none; flex-direction: column;
+    overflow: hidden; box-shadow: 0 8px 30px rgba(0,0,0,.6); }
+  #chatpanel.open { display: flex; }
+  #chatpanel header { display: flex; align-items: center; padding: 12px 16px;
+    border-bottom: 1px solid #22305c; font-weight: 700; font-size: 17px; }
+  #chatpanel header span { flex: 1; }
+  #chatmsgs { flex: 1; overflow-y: auto; padding: 12px 14px;
+    display: flex; flex-direction: column; gap: 10px; }
+  .cmsg { max-width: 85%; padding: 9px 13px; border-radius: 14px;
+    font-size: 14px; line-height: 1.45; white-space: pre-wrap;
+    word-break: break-word; }
+  .cmsg.tama { background: #1a2440; color: #eef2ff; align-self: flex-start;
+    border-bottom-left-radius: 4px; }
+  .cmsg.user { background: #ffd166; color: #201500; align-self: flex-end;
+    border-bottom-right-radius: 4px; }
+  .cmsg.typing { color: #8b96bd; font-style: italic; }
+  #chatrow { display: flex; gap: 8px; padding: 10px 12px;
+    border-top: 1px solid #22305c; }
+  #chatinput { flex: 1; padding: 10px 12px; font-size: 15px; border-radius: 10px;
+    border: 1px solid #2b3a63; background: #0b1226; color: #eef2ff; }
+  #chatsend { padding: 10px 16px; font-size: 16px; border-radius: 10px;
+    border: none; background: #ffd166; color: #201500; font-weight: 700;
+    cursor: pointer; }
   /* search */
   #searchrow { display: flex; gap: 10px; }
   #q { flex: 1; padding: 12px 14px; font-size: 16px; border-radius: 10px;
@@ -1070,6 +1101,66 @@ window.clearQueue = function clearQueue() {
 };
 $("clearbtn").addEventListener("click", window.clearQueue);
 
+/* ---------- Tama AI chat ---------- */
+let chatHistory = [];
+function chatAdd(role, text) {
+  const box = $("chatmsgs");
+  const d = el("div", "cmsg " + (role === "user" ? "user" : "tama"), text);
+  box.appendChild(d);
+  box.scrollTop = box.scrollHeight;
+  return d;
+}
+$("chatfab").addEventListener("click", () => {
+  const p = $("chatpanel");
+  p.classList.toggle("open");
+  if (p.classList.contains("open") && !chatHistory.length)
+    chatAdd("tama", "Hey master! 🎤 I'm Tama — ask me to find a song, play something, or queue it up!");
+});
+$("chatclose").addEventListener("click", () =>
+  $("chatpanel").classList.remove("open"));
+async function chatActOnDirective(query, action) {
+  /* [[play: x]] / [[reserve: x]] -> search top hit, then play/reserve it */
+  try {
+    const r = await fetch("/api/search?q=" + encodeURIComponent(query));
+    const data = await r.json();
+    const hit = (data.items || [])[0];
+    if (!hit) { chatAdd("tama", "Couldn't find “" + query + "” — try another title?"); return; }
+    if (action === "play") { playNowVideo(hit, null); chatAdd("tama", "▶ Playing “" + hit.title + "”!"); }
+    else { reserveVideo(hit, null); chatAdd("tama", "✓ Queued “" + hit.title + "”!"); }
+  } catch (e) { chatAdd("tama", "Search hiccup — try again?"); }
+}
+async function sendChat() {
+  const inp = $("chatinput");
+  const text = inp.value.trim();
+  if (!text) return;
+  inp.value = "";
+  chatAdd("user", text);
+  chatHistory.push({ role: "user", content: text });
+  const typing = chatAdd("tama", "…");
+  typing.classList.add("typing");
+  let reply = "";
+  try {
+    const r = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: chatHistory.slice(-10) }),
+    });
+    const data = await r.json();
+    reply = data.reply || "";
+  } catch (e) { reply = ""; }
+  typing.remove();
+  if (!reply) reply = "Brain freeze, master — say that again? 🎤";
+  chatHistory.push({ role: "assistant", content: reply });
+  /* pull out [[play: x]] / [[reserve: x]] directives, run them silently */
+  const actions = [];
+  reply = reply.replace(/\[\[(play|reserve):([^\]]+)\]\]/gi,
+    (m, a, q) => { actions.push([a.toLowerCase(), q.trim()]); return ""; }).trim();
+  chatAdd("tama", reply || "On it, master! 🎤");
+  for (const [a, q] of actions) chatActOnDirective(q, a);
+}
+$("chatsend").addEventListener("click", sendChat);
+$("chatinput").addEventListener("keydown", e => { if (e.key === "Enter") sendChat(); });
+
 /* ---------- start ---------- */
 let started = false;
 function startApp() {
@@ -1091,5 +1182,15 @@ showBg(true);
 /* the native screen app loads ?autostart=1 so no tap is needed */
 if (new URLSearchParams(location.search).get("autostart") === "1") startApp();
 </script>
+<!-- Tama AI chat -->
+<button id="chatfab" title="Chat with Tama">💬</button>
+<div id="chatpanel">
+  <header><span>🎤 Tama</span><button class="x" id="chatclose">&times;</button></header>
+  <div id="chatmsgs"></div>
+  <div id="chatrow">
+    <input id="chatinput" placeholder="Ask Tama…" autocomplete="off">
+    <button id="chatsend">➤</button>
+  </div>
+</div>
 </body>
 </html>

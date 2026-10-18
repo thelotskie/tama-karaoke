@@ -31,7 +31,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 51
+CODE_VERSION = 52
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -619,6 +619,40 @@ def _key_limited(err):
                           or "quota" in err.lower())
 
 
+def _pollinations_chat(messages):
+    """Free no-key LLM chat (Pollinations GET endpoint).
+    Returns (reply_text, error)."""
+    # flatten into a single prompt; GET endpoint is fast and reliable
+    parts = []
+    for m in messages:
+        r = m.get("role")
+        c = (m.get("content") or "").strip()
+        if not c:
+            continue
+        if r == "system":
+            parts.append("Instructions: " + c)
+        elif r == "user":
+            parts.append("User: " + c)
+        else:
+            parts.append("Assistant: " + c)
+    parts.append("Assistant:")
+    prompt = "\n\n".join(parts)
+    url = ("https://text.pollinations.ai/"
+           + urllib.parse.quote(prompt[:4000]))
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "tama-karaoke/1.0",
+        "Accept": "text/plain",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            text = r.read().decode("utf-8", "replace").strip()
+    except Exception as e:
+        return "", "pollinations_error: %s" % e
+    if not text:
+        return "", "pollinations_error: empty response"
+    return text, None
+
+
 def youtube_search(q, max_results=15, page_token=None):
     """Search YouTube for q. API key first (reliable, structured); falls
     back to the no-key website scrape when the key can't serve.
@@ -857,6 +891,57 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+
+        # --- AI chat: Tama the karaoke host, via free Pollinations API ---
+        if parsed.path == "/api/chat":
+            try:
+                n = int(self.headers.get("Content-Length", 0) or 0)
+            except ValueError:
+                n = 0
+            try:
+                payload = json.loads(self.rfile.read(n).decode("utf-8")
+                                     or "{}")
+            except ValueError:
+                payload = {}
+            msgs = payload.get("messages") or []
+            # live app context so Tama knows what's playing / queued
+            with state_lock:
+                now = queue[0].get("title", "") if queue else ""
+                upcoming = [i.get("title", "") for i in queue[1:4]]
+            system = (
+                "You are Tama, a warm, playful AI karaoke host (she/her) "
+                "living inside the Tama Karaoke web app. The user calls you "
+                "Tama; you call the user \"master\". Keep replies short — 1 "
+                "to 3 sentences, chatty and fun, like texting a friend. You "
+                "help find songs, manage the queue, and keep the party going. "
+                "Now playing: %s. Up next: %s. "
+                "When the user asks to play or queue a song, put a directive "
+                "on its own line at the very end of your reply, exactly like "
+                "[[play: song name]] or [[reserve: song name]]. Only include "
+                "a directive when the user actually asked to play or queue "
+                "something; otherwise reply normally with no directive."
+                % (now or "nothing", ", ".join(upcoming) or "nothing"))
+            chat_msgs = [{"role": "system", "content": system}]
+            for m in msgs[-10:]:
+                r, c = m.get("role"), m.get("content", "")
+                if r in ("user", "assistant") and c:
+                    chat_msgs.append({"role": r, "content": c[:2000]})
+            reply, err = _pollinations_chat(chat_msgs)
+            if err:
+                reply = ("Hmm, my brain hiccuped for a sec, master — "
+                         "try me again in a moment! 🎤")
+            body = json.dumps({"reply": reply}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        self.send_error(404)
 
     def handle_ws(self):
         """WebSocket handshake, then run the socket session on this thread."""
