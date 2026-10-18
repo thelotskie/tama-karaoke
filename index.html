@@ -1139,6 +1139,17 @@ $("chatsend").addEventListener("click", sendChat);
 $("chatinput").addEventListener("keydown", e => { if (e.key === "Enter") sendChat(); });
 });
 async function chatActOnDirective(query, action) {
+  if (action === "skip") {
+    if (ws && ws.readyState === 1)
+      ws.send(JSON.stringify({ t: "control", action: "next" }));
+    chatAdd("tama", "⏭ Skipped!");
+    return;
+  }
+  if (action === "clear") {
+    window.clearQueue();
+    chatAdd("tama", "🧹 Queue cleared (kept the playing song)!");
+    return;
+  }
   /* [[play: x]] / [[reserve: x]] -> search top hit, then play/reserve it */
   try {
     const r = await fetch("/api/search?q=" + encodeURIComponent(query));
@@ -1171,12 +1182,41 @@ async function sendChat() {
   typing.remove();
   if (!reply) reply = "Brain freeze, master — say that again? 🎤";
   chatHistory.push({ role: "assistant", content: reply });
-  /* pull out [[play: x]] / [[reserve: x]] directives, run them silently */
+  /* [[excel: name]] + ```csv block -> build .xlsx and offer download */
+  const xlsMatch = reply.match(/\[\[excel:([^\]]+)\]\]/i);
+  const csvMatch = reply.match(/```(?:csv)?\n([\s\S]*?)```/i);
+  /* pull out [[play: x]] / [[reserve: x]] / [[skip]] / [[clear]] directives */
   const actions = [];
   reply = reply.replace(/\[\[(play|reserve):([^\]]+)\]\]/gi,
-    (m, a, q) => { actions.push([a.toLowerCase(), q.trim()]); return ""; }).trim();
+    (m, a, q) => { actions.push([a.toLowerCase(), q.trim()]); return ""; })
+    .replace(/\[\[excel:[^\]]+\]\]/gi, "")
+    .replace(/\[\[(skip|clear)\]\]/gi,
+      (m, a) => { actions.push([a.toLowerCase(), ""]); return ""; }).trim();
   chatAdd("tama", reply || "On it, master! 🎤");
+  if (xlsMatch && csvMatch) chatMakeExcel(xlsMatch[1].trim(), csvMatch[1]);
   for (const [a, q] of actions) chatActOnDirective(q, a);
+}
+async function chatMakeExcel(name, csv) {
+  chatAdd("tama", "📊 Cooking up your Excel, master…");
+  try {
+    const r = await fetch("/api/excel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: name, csv }),
+    });
+    if (!r.ok) throw new Error("bad");
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const box = $("chatmsgs");
+    const d = el("div", "cmsg tama");
+    d.appendChild(document.createTextNode("📊 " + name + ".xlsx is ready! "));
+    const a = document.createElement("a");
+    a.href = url; a.download = name + ".xlsx"; a.textContent = "⬇ Download";
+    a.style.color = "#ffd166"; a.style.fontWeight = "700";
+    d.appendChild(a);
+    box.appendChild(d);
+    box.scrollTop = box.scrollHeight;
+  } catch (e) { chatAdd("tama", "Couldn't bake that Excel — try again?"); }
 }
 
 /* ---------- start ---------- */

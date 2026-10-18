@@ -31,7 +31,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 55
+CODE_VERSION = 56
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -619,6 +619,92 @@ def _key_limited(err):
                           or "quota" in err.lower())
 
 
+def _col_letters(i):
+    """0-based column index -> Excel letters (0=A, 25=Z, 26=AA)."""
+    s = ""
+    i += 1
+    while i:
+        i, r = divmod(i - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+def _xml_esc(s):
+    return (s.replace("&", "&amp;").replace("<", "&lt;")
+             .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def build_xlsx(rows, sheet_name="Sheet1"):
+    """Minimal .xlsx from a list of rows (stdlib only: zipfile + XML).
+    Strings use inlineStr; numeric-looking cells become numbers."""
+    import io
+    import zipfile
+
+    sheet_name = (sheet_name or "Sheet1")[:31]
+    body = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+            '<worksheet xmlns="http://schemas.openxmlformats.org/'
+            'spreadsheetml/2006/main"><sheetData>']
+    for ri, row in enumerate(rows, 1):
+        cells = []
+        for ci, val in enumerate(row):
+            ref = _col_letters(ci) + str(ri)
+            s = "" if val is None else str(val)
+            try:
+                num = float(s.replace(",", ""))
+                if s.strip() != "":
+                    cells.append('<c r="%s"><v>%s</v></c>' % (ref, num))
+                    continue
+            except ValueError:
+                pass
+            cells.append('<c r="%s" t="inlineStr"><is><t>%s</t></is></c>'
+                         % (ref, _xml_esc(s)))
+        body.append("<row r=\"%d\">%s</row>" % (ri, "".join(cells)))
+    body.append("</sheetData></worksheet>")
+    sheet_xml = "".join(body)
+
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/'
+        'content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.'
+        'openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.'
+        'openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType='
+        '"application/vnd.openxmlformats-officedocument.spreadsheetml.'
+        'worksheet+xml"/></Types>')
+    rels = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/'
+        '2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/'
+        'officeDocument/2006/relationships/officeDocument" '
+        'Target="xl/workbook.xml"/></Relationships>')
+    workbook = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/'
+        '2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/'
+        '2006/relationships"><sheets><sheet name="%s" sheetId="1" '
+        'r:id="rId1"/></sheets></workbook>' % _xml_esc(sheet_name))
+    wb_rels = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/'
+        '2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/'
+        'officeDocument/2006/relationships/worksheet" '
+        'Target="worksheets/sheet1.xml"/></Relationships>')
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", content_types)
+        z.writestr("_rels/.rels", rels)
+        z.writestr("xl/workbook.xml", workbook)
+        z.writestr("xl/_rels/workbook.xml.rels", wb_rels)
+        z.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+    return buf.getvalue()
+
+
 def _pollinations_chat(messages):
     """Free no-key LLM chat (Pollinations GET endpoint).
     Returns (reply_text, error)."""
@@ -878,6 +964,7 @@ class Handler(BaseHTTPRequestHandler):
         if not os.path.isfile(full):
             self.send_error(404)
             return
+            return
         with open(full, "rb") as f:
             body = f.read()
         if rel == "index.html":
@@ -895,6 +982,41 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
 
+        # --- excel export: {title, csv} -> downloadable .xlsx ---
+        if parsed.path == "/api/excel":
+            try:
+                n = int(self.headers.get("Content-Length", 0) or 0)
+            except ValueError:
+                n = 0
+            try:
+                payload = json.loads(self.rfile.read(n).decode("utf-8")
+                                     or "{}")
+            except ValueError:
+                payload = {}
+            title = str(payload.get("title") or "sheet")[:60]
+            csv_text = str(payload.get("csv") or "")
+            import csv as _csv
+            import io as _io
+            rows = [r for r in _csv.reader(_io.StringIO(csv_text))]
+            rows = rows[:500]  # sanity cap
+            if not rows:
+                self.send_error(400)
+                return
+            xlsx = build_xlsx(rows, title)
+            fname = "".join(c if c.isalnum() or c in "-_"
+                            else "_" for c in title) or "sheet"
+            self.send_response(200)
+            self.send_header(
+                "Content-Type",
+                "application/vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet")
+            self.send_header("Content-Disposition",
+                             'attachment; filename="%s.xlsx"' % fname)
+            self.send_header("Content-Length", str(len(xlsx)))
+            self.end_headers()
+            self.wfile.write(xlsx)
+            return
+
         # --- AI chat: Tama the karaoke host, via free Pollinations API ---
         if parsed.path == "/api/chat":
             try:
@@ -910,20 +1032,28 @@ class Handler(BaseHTTPRequestHandler):
             # live app context so Tama knows what's playing / queued
             with state_lock:
                 now = queue[0].get("title", "") if queue else ""
-                upcoming = [i.get("title", "") for i in queue[1:4]]
+                upcoming = [i.get("title", "") for i in queue[1:8]]
             system = (
-                "You are Tama, a warm, playful AI karaoke host (she/her) "
+                "You are Tama, a warm, playful, smart AI assistant (she/her) "
                 "living inside the Tama Karaoke web app. The user calls you "
-                "Tama; you call the user \"master\". Keep replies short — 1 "
-                "to 3 sentences, chatty and fun, like texting a friend. You "
-                "help find songs, manage the queue, and keep the party going. "
-                "Now playing: %s. Up next: %s. "
-                "When the user asks to play or queue a song, put a directive "
-                "on its own line at the very end of your reply, exactly like "
-                "[[play: song name]] or [[reserve: song name]]. Only include "
-                "a directive when the user actually asked to play or queue "
-                "something; otherwise reply normally with no directive."
-                % (now or "nothing", ", ".join(upcoming) or "nothing"))
+                "Tama; you call the user \"master\". Keep chat replies short "
+                "— 1 to 3 sentences, chatty and fun. You are knowledgeable "
+                "about music, can recommend songs/artists, explain things, "
+                "help with small coding questions, and you can CREATE Excel "
+                "spreadsheets on request.\n"
+                "Live app state — Now playing: %s. Queue: %s.\n"
+                "Directives (put on its own line at the very end of your "
+                "reply, only when the user asked for that action):\n"
+                "- [[play: song name]] — play a song now\n"
+                "- [[reserve: song name]] — add a song to the queue\n"
+                "- [[skip]] — skip the current song\n"
+                "- [[clear]] — clear the queue (keeps the playing song)\n"
+                "- [[excel: file name]] — when the user asks for a "
+                "spreadsheet/table/Excel file: put this directive first, "
+                "then output the table data as a ```csv code block. First "
+                "row = headers. Keep it under 100 rows.\n"
+                "Only include directives the user actually asked for."
+                % (now or "nothing", ", ".join(upcoming) or "empty"))
             chat_msgs = [{"role": "system", "content": system}]
             for m in msgs[-10:]:
                 r, c = m.get("role"), m.get("content", "")
