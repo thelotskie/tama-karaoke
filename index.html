@@ -1178,8 +1178,6 @@ async function sendChat() {
   chatAdd("tama", reply || "On it, master! 🎤");
   for (const [a, q] of actions) chatActOnDirective(q, a);
 }
-$("chatsend").addEventListener("click", sendChat);
-$("chatinput").addEventListener("keydown", e => { if (e.key === "Enter") sendChat(); });
 
 /* ---------- start ---------- */
 let started = false;
