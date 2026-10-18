@@ -172,6 +172,9 @@
   #chatsend { padding: 10px 16px; font-size: 16px; border-radius: 10px;
     border: none; background: #ffd166; color: #201500; font-weight: 700;
     cursor: pointer; }
+  .ccode { background: #0b1226; border: 1px solid #2b3a63; border-radius: 8px;
+    padding: 8px 10px; margin: 6px 0; font-family: monospace; font-size: 12px;
+    overflow-x: auto; white-space: pre; }
   /* search */
   #searchrow { display: flex; gap: 10px; }
   #q { flex: 1; padding: 12px 14px; font-size: 16px; border-radius: 10px;
@@ -1105,7 +1108,18 @@ $("clearbtn").addEventListener("click", window.clearQueue);
 let chatHistory = [];
 function chatAdd(role, text) {
   const box = $("chatmsgs");
-  const d = el("div", "cmsg " + (role === "user" ? "user" : "tama"), text);
+  const d = el("div", "cmsg " + (role === "user" ? "user" : "tama"));
+  /* render ```code blocks``` as monospace, rest as plain text */
+  const parts = String(text).split(/```/);
+  parts.forEach((p, i) => {
+    if (i % 2 === 1) {
+      const pre = el("pre", "ccode", p.replace(/^\w+\n/, ""));
+      d.appendChild(pre);
+    } else if (p) {
+      d.appendChild(document.createTextNode(p));
+    }
+  });
+  if (!d.hasChildNodes()) d.textContent = text;
   box.appendChild(d);
   box.scrollTop = box.scrollHeight;
   return d;
