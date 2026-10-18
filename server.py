@@ -31,7 +31,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 57
+CODE_VERSION = 58
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -635,32 +635,56 @@ def _xml_esc(s):
 
 
 def build_xlsx(rows, sheet_name="Sheet1"):
-    """Minimal .xlsx from a list of rows (stdlib only: zipfile + XML).
+    """Minimal multi-sheet .xlsx (stdlib only: zipfile + XML).
+    Call as build_xlsx(rows, name) for one sheet, or
+    build_xlsx([(name, rows), ...]) for several.
     Strings use inlineStr; numeric-looking cells become numbers."""
     import io
     import zipfile
 
-    sheet_name = (sheet_name or "Sheet1")[:31]
-    body = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
-            '<worksheet xmlns="http://schemas.openxmlformats.org/'
-            'spreadsheetml/2006/main"><sheetData>']
-    for ri, row in enumerate(rows, 1):
-        cells = []
-        for ci, val in enumerate(row):
-            ref = _col_letters(ci) + str(ri)
-            s = "" if val is None else str(val)
-            try:
-                num = float(s.replace(",", ""))
-                if s.strip() != "":
-                    cells.append('<c r="%s"><v>%s</v></c>' % (ref, num))
-                    continue
-            except ValueError:
-                pass
-            cells.append('<c r="%s" t="inlineStr"><is><t>%s</t></is></c>'
-                         % (ref, _xml_esc(s)))
-        body.append("<row r=\"%d\">%s</row>" % (ri, "".join(cells)))
-    body.append("</sheetData></worksheet>")
-    sheet_xml = "".join(body)
+    def sheet_xml(rows):
+        body = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+                '<worksheet xmlns="http://schemas.openxmlformats.org/'
+                'spreadsheetml/2006/main"><sheetData>']
+        for ri, row in enumerate(rows, 1):
+            cells = []
+            for ci, val in enumerate(row):
+                ref = _col_letters(ci) + str(ri)
+                s = "" if val is None else str(val)
+                try:
+                    num = float(s.replace(",", ""))
+                    if s.strip() != "":
+                        cells.append('<c r="%s"><v>%s</v></c>' % (ref, num))
+                        continue
+                except ValueError:
+                    pass
+                cells.append('<c r="%s" t="inlineStr"><is><t>%s</t></is></c>'
+                             % (ref, _xml_esc(s)))
+            body.append("<row r=\"%d\">%s</row>" % (ri, "".join(cells)))
+        body.append("</sheetData></worksheet>")
+        return "".join(body)
+
+    # normalize: build_xlsx(rows, name) -> [(name, rows)];
+    # build_xlsx([(name, rows), ...]) passes through
+    if isinstance(sheet_name, str) and rows and isinstance(rows[0], (list, tuple)) \
+            and rows[0] and isinstance(rows[0][0], str) \
+            and isinstance(rows[0][1], (list, tuple)):
+        sheets = rows  # already [(name, rows), ...]
+    else:
+        sheets = [(sheet_name, rows)]
+    sheets = [((n or "Sheet%d" % (i + 1))[:31], r)
+              for i, (n, r) in enumerate(sheets)]
+    # dedupe sheet names (Excel forbids duplicates)
+    seen = {}
+    fixed = []
+    for n, r in sheets:
+        if n in seen:
+            seen[n] += 1
+            n = (n[:28] + str(seen[n]))[:31]
+        else:
+            seen[n] = 1
+        fixed.append((n, r))
+    sheets = fixed
 
     content_types = (
         '<?xml version="1.0" encoding="UTF-8"?>'
@@ -671,9 +695,11 @@ def build_xlsx(rows, sheet_name="Sheet1"):
         '<Default Extension="xml" ContentType="application/xml"/>'
         '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.'
         'openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType='
-        '"application/vnd.openxmlformats-officedocument.spreadsheetml.'
-        'worksheet+xml"/></Types>')
+        + "".join(
+            '<Override PartName="/xl/worksheets/sheet%d.xml" ContentType='
+            '"application/vnd.openxmlformats-officedocument.spreadsheetml.'
+            'worksheet+xml"/>' % (i + 1) for i in range(len(sheets)))
+        + '</Types>')
     rels = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<Relationships xmlns="http://schemas.openxmlformats.org/package/'
@@ -681,19 +707,24 @@ def build_xlsx(rows, sheet_name="Sheet1"):
         '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/'
         'officeDocument/2006/relationships/officeDocument" '
         'Target="xl/workbook.xml"/></Relationships>')
+    sheet_entries = "".join(
+        '<sheet name="%s" sheetId="%d" r:id="rId%d"/>'
+        % (_xml_esc(n), i + 1, i + 1) for i, (n, r) in enumerate(sheets))
     workbook = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/'
         '2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/'
-        '2006/relationships"><sheets><sheet name="%s" sheetId="1" '
-        'r:id="rId1"/></sheets></workbook>' % _xml_esc(sheet_name))
+        '2006/relationships"><sheets>%s</sheets></workbook>' % sheet_entries)
     wb_rels = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<Relationships xmlns="http://schemas.openxmlformats.org/package/'
         '2006/relationships">'
-        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/'
-        'officeDocument/2006/relationships/worksheet" '
-        'Target="worksheets/sheet1.xml"/></Relationships>')
+        + "".join(
+            '<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/'
+            'officeDocument/2006/relationships/worksheet" '
+            'Target="worksheets/sheet%d.xml"/>' % (i + 1, i + 1)
+            for i in range(len(sheets)))
+        + '</Relationships>')
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
@@ -701,7 +732,9 @@ def build_xlsx(rows, sheet_name="Sheet1"):
         z.writestr("_rels/.rels", rels)
         z.writestr("xl/workbook.xml", workbook)
         z.writestr("xl/_rels/workbook.xml.rels", wb_rels)
-        z.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+        for i, (n, rows) in enumerate(sheets):
+            z.writestr("xl/worksheets/sheet%d.xml" % (i + 1),
+                       sheet_xml(rows))
     return buf.getvalue()
 
 
@@ -729,11 +762,18 @@ def _pollinations_chat(messages):
         "User-Agent": "tama-karaoke/1.0",
         "Accept": "text/plain",
     })
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            text = r.read().decode("utf-8", "replace").strip()
-    except Exception as e:
-        return "", "pollinations_error: %s" % e
+    text, last_err = "", None
+    for attempt in range(2):  # one retry on transient failures
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                text = r.read().decode("utf-8", "replace").strip()
+            last_err = None
+            break
+        except Exception as e:
+            last_err = "pollinations_error: %s" % e
+            text = ""
+    if last_err:
+        return "", last_err
     if not text:
         return "", "pollinations_error: empty response"
     return text, None
@@ -982,7 +1022,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
 
-        # --- excel export: {title, csv} -> downloadable .xlsx ---
+        # --- excel export: {sheets:[{title,csv}]} -> downloadable .xlsx ---
         if parsed.path == "/api/excel":
             try:
                 n = int(self.headers.get("Content-Length", 0) or 0)
@@ -993,16 +1033,26 @@ class Handler(BaseHTTPRequestHandler):
                                      or "{}")
             except ValueError:
                 payload = {}
-            title = str(payload.get("title") or "sheet")[:60]
-            csv_text = str(payload.get("csv") or "")
             import csv as _csv
             import io as _io
-            rows = [r for r in _csv.reader(_io.StringIO(csv_text))]
-            rows = rows[:500]  # sanity cap
-            if not rows:
+
+            def _rows_of(csv_text):
+                return [r for r in
+                        _csv.reader(_io.StringIO(str(csv_text or "")))][:500]
+
+            incoming = payload.get("sheets")
+            if isinstance(incoming, list) and incoming:
+                sheets = [(str(s.get("title") or "")[:31],
+                           _rows_of(s.get("csv"))) for s in incoming[:10]]
+                title = str(incoming[0].get("title") or "sheet")[:60]
+            else:  # legacy single-sheet {title, csv}
+                title = str(payload.get("title") or "sheet")[:60]
+                sheets = [(title, _rows_of(payload.get("csv")))]
+            sheets = [(t, r) for t, r in sheets if r]
+            if not sheets:
                 self.send_error(400)
                 return
-            xlsx = build_xlsx(rows, title)
+            xlsx = build_xlsx(sheets)
             fname = "".join(c if c.isalnum() or c in "-_"
                             else "_" for c in title) or "sheet"
             self.send_response(200)
@@ -1050,8 +1100,18 @@ class Handler(BaseHTTPRequestHandler):
                 "- [[clear]] — clear the queue (keeps the playing song)\n"
                 "- [[excel: file name]] — when the user asks for a "
                 "spreadsheet/table/Excel file: put this directive first, "
-                "then output the table data as a ```csv code block. First "
-                "row = headers. Keep it under 100 rows.\n"
+                "then for EACH sheet output a [[sheet: Sheet Name]] line "
+                "followed by a ```csv code block. First csv row = headers. "
+                "Keep each sheet under 100 rows. Example:\n"
+                "[[excel: songs]]\n"
+                "[[sheet: Input]]\n"
+                "```csv\nSong,Artist,Year\n```\n"
+                "[[sheet: Database]]\n"
+                "```csv\nSong,Artist,Year\n```\n"
+                "If the user wants a submit-button/macro behavior between "
+                "sheets (e.g. copy new rows from Input to a Database sheet), "
+                "still generate the file AND include a short VBA macro in "
+                "your reply text they can paste into Excel.\n"
                 "Only include directives the user actually asked for."
                 % (now or "nothing", ", ".join(upcoming) or "empty"))
             chat_msgs = [{"role": "system", "content": system}]

@@ -1182,9 +1182,19 @@ async function sendChat() {
   typing.remove();
   if (!reply) reply = "Brain freeze, master — say that again? 🎤";
   chatHistory.push({ role: "assistant", content: reply });
-  /* [[excel: name]] + ```csv block -> build .xlsx and offer download */
+  /* [[excel: name]] + [[sheet: name]] / ```csv blocks -> .xlsx download */
   const xlsMatch = reply.match(/\[\[excel:([^\]]+)\]\]/i);
-  const csvMatch = reply.match(/```(?:csv)?\n([\s\S]*?)```/i);
+  const sheetBlocks = [];
+  if (xlsMatch) {
+    const re = /\[\[sheet:([^\]]+)\]\]\s*```(?:csv)?\n([\s\S]*?)```/gi;
+    let m;
+    while ((m = re.exec(reply))) sheetBlocks.push([m[1].trim(), m[2]]);
+    if (!sheetBlocks.length) {
+      /* single-sheet fallback: one csv block, no [[sheet:]] markers */
+      const c = reply.match(/```(?:csv)?\n([\s\S]*?)```/i);
+      if (c) sheetBlocks.push([xlsMatch[1].trim(), c[1]]);
+    }
+  }
   /* pull out [[play: x]] / [[reserve: x]] / [[skip]] / [[clear]] directives */
   const actions = [];
   reply = reply.replace(/\[\[(play|reserve):([^\]]+)\]\]/gi,
@@ -1193,24 +1203,28 @@ async function sendChat() {
     .replace(/\[\[(skip|clear)\]\]/gi,
       (m, a) => { actions.push([a.toLowerCase(), ""]); return ""; }).trim();
   chatAdd("tama", reply || "On it, master! 🎤");
-  if (xlsMatch && csvMatch) chatMakeExcel(xlsMatch[1].trim(), csvMatch[1]);
+  if (xlsMatch && sheetBlocks.length)
+    chatMakeExcel(xlsMatch[1].trim(), sheetBlocks);
   for (const [a, q] of actions) chatActOnDirective(q, a);
 }
-async function chatMakeExcel(name, csv) {
+async function chatMakeExcel(name, sheets) {
   name = name.replace(/\.(csv|xlsx?)$/i, "");  /* avoid "songs.xlsx.xlsx" */
   chatAdd("tama", "📊 Cooking up your Excel, master…");
   try {
     const r = await fetch("/api/excel", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: name, csv }),
+      body: JSON.stringify({ sheets: sheets.map(([title, csv]) =>
+        ({ title, csv })) }),
     });
     if (!r.ok) throw new Error("bad");
     const blob = await r.blob();
     const url = URL.createObjectURL(blob);
     const box = $("chatmsgs");
     const d = el("div", "cmsg tama");
-    d.appendChild(document.createTextNode("📊 " + name + ".xlsx is ready! "));
+    d.appendChild(document.createTextNode(
+      "📊 " + name + ".xlsx is ready (" + sheets.length +
+      (sheets.length === 1 ? " sheet)! " : " sheets)! ")));
     const a = document.createElement("a");
     a.href = url; a.download = name + ".xlsx"; a.textContent = "⬇ Download";
     a.style.color = "#ffd166"; a.style.fontWeight = "700";
