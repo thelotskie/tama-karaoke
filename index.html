@@ -1197,6 +1197,7 @@ async function sendChat() {
   for (const [a, q] of actions) chatActOnDirective(q, a);
 }
 async function chatMakeExcel(name, csv) {
+  name = name.replace(/\.(csv|xlsx?)$/i, "");  /* avoid "songs.xlsx.xlsx" */
   chatAdd("tama", "📊 Cooking up your Excel, master…");
   try {
     const r = await fetch("/api/excel", {
