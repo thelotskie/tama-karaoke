@@ -630,31 +630,15 @@ function checkVersion() {
 setInterval(checkVersion, 60000);
 setTimeout(checkVersion, 15000);
 
-/* ---------- subtitles/CC toggle (v59) ---------- */
-let ccOn = true;  /* YouTube shows captions by default; tap CC to hide */
-let ccBtnEl = null;
-function ccButton() {
-  if (!ccBtnEl) {
-    ccBtnEl = el("button", "", "CC");
-    ccBtnEl.id = "ccbtn";
-    ccBtnEl.title = "Subtitles on/off";
-    ccBtnEl.addEventListener("click", e => {
-      e.stopPropagation();
-      ccOn = !ccOn;
-      applyCC();
-    });
-  }
-  ccBtnEl.classList.toggle("off", !ccOn);
-  return ccBtnEl;
-}
+/* ---------- subtitles/CC (v60): Plyr's native CC button in the control
+   bar, backed by direct YouTube API calls so auto-captions really hide --- */
+let ccOn = true;  /* YouTube shows captions by default */
 function applyCC() {
-  if (ccBtnEl) ccBtnEl.classList.toggle("off", !ccOn);
+  /* re-assert the saved state on each new video (YouTube resets it) */
+  ytSetCC(ccOn);
   try {
-    const yt = plyr && plyr.embed;
-    if (yt && yt.loadModule) {
-      if (ccOn) yt.loadModule("captions");
-      else yt.unloadModule("captions");
-    }
+    /* keep Plyr's own toggle in sync without firing events */
+    if (plyr && plyr.captions) plyr.captions.active = ccOn;
   } catch (e) {}
 }
 
@@ -671,17 +655,40 @@ function playVideo(v) {
   node.setAttribute("data-plyr-provider", "youtube");
   node.setAttribute("data-plyr-embed-id", v.videoId);
   wrap.appendChild(node);
-  wrap.appendChild(ccButton());  /* v59: subtitles toggle survives reloads */
   plyr = new Plyr("#plyr", {
     autoplay: true,
     controls: ["play-large", "play", "progress", "current-time",
-               "mute", "volume", "settings", "fullscreen"],
+               "mute", "volume", "captions", "settings", "fullscreen"],
     settings: ["speed"],
+    captions: { active: true, update: true },
     speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
     youtube: { rel: 0, modestbranding: 1, iv_load_policy: 3 }
   });
-  plyr.on("ready", applyCC);  /* v59: re-apply saved subtitle state */
+  plyr.on("ready", applyCC);  /* v60: re-apply saved subtitle state */
+  plyr.on("captionsenabled", () => { ccOn = true; ytSetCC(true); });
+  plyr.on("captionsdisabled", () => { ccOn = false; ytSetCC(false); });
   wirePlayerEvents();
+}
+
+/* v60: drive YouTube captions directly — Plyr's native toggle alone
+   doesn't reliably hide YouTube's auto-captions */
+function ytSetCC(on) {
+  try {
+    const yt = plyr && plyr.embed;
+    if (!yt || !yt.setOption) return;
+    if (on) {
+      let tracks = [];
+      try { tracks = yt.getOption("captions", "tracklist") || []; } catch (e) {}
+      const t = tracks.find(x => (x.languageCode || "").indexOf("en") === 0)
+                || tracks[0];
+      if (t && t.languageCode)
+        yt.setOption("captions", "track", { languageCode: t.languageCode });
+      else
+        yt.loadModule("captions");
+    } else {
+      yt.setOption("captions", "track", {});
+    }
+  } catch (e) {}
 }
 
 /* ---------- search (this screen can reserve too) ---------- */
