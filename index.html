@@ -18,11 +18,6 @@
   #ytwrap { position: fixed; z-index: 1; opacity: 0; transition: opacity .8s;
     width: min(1280px, 94vw, calc(94vh * 16 / 9)); aspect-ratio: 16 / 9;
     left: 50%; top: 50%; transform: translate(-50%, -50%); background: #000; }
-  #ccbtn { position: absolute; top: 8px; right: 8px; z-index: 5;
-    background: rgba(0,0,0,.65); color: #fff; border: 1px solid #ffffff44;
-    border-radius: 6px; padding: 4px 10px; font-size: 13px; font-weight: 800;
-    cursor: pointer; letter-spacing: 1px; }
-  #ccbtn.off { opacity: .4; }
   #ytwrap.on { opacity: 1; }
   #plyr, #plyr .plyr { width: 100%; height: 100%; }
   /* zoom OFF (v36): show the full YouTube frame, nothing cropped.
@@ -630,16 +625,12 @@ function checkVersion() {
 setInterval(checkVersion, 60000);
 setTimeout(checkVersion, 15000);
 
-/* ---------- subtitles/CC (v60): Plyr's native CC button in the control
-   bar, backed by direct YouTube API calls so auto-captions really hide --- */
+/* ---------- subtitles/CC (v61): custom CC button inside Plyr's control
+   bar, driving the YouTube API directly ------------------------------- */
 let ccOn = true;  /* YouTube shows captions by default */
 function applyCC() {
   /* re-assert the saved state on each new video (YouTube resets it) */
   ytSetCC(ccOn);
-  try {
-    /* keep Plyr's own toggle in sync without firing events */
-    if (plyr && plyr.captions) plyr.captions.active = ccOn;
-  } catch (e) {}
 }
 
 function playVideo(v) {
@@ -658,21 +649,50 @@ function playVideo(v) {
   plyr = new Plyr("#plyr", {
     autoplay: true,
     controls: ["play-large", "play", "progress", "current-time",
-               "mute", "volume", "captions", "settings", "fullscreen"],
+               "mute", "volume", "settings", "fullscreen"],
     settings: ["speed"],
-    captions: { active: true, update: true },
     speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
     youtube: { rel: 0, modestbranding: 1, iv_load_policy: 3 }
   });
-  plyr.on("ready", applyCC);  /* v60: re-apply saved subtitle state */
-  plyr.on("captionsenabled", () => { ccOn = true; ytSetCC(true); });
-  plyr.on("captionsdisabled", () => { ccOn = false; ytSetCC(false); });
+  plyr.on("ready", () => { injectCCButton(); applyCC(); });
   wirePlayerEvents();
+}
+
+/* v61: custom CC button injected into Plyr's own control bar (Plyr hides
+   its native captions button for YouTube, so we add our own that calls
+   the YouTube IFrame API directly) */
+function injectCCButton() {
+  try {
+    const controls = document.querySelector("#ytwrap .plyr__controls");
+    if (!controls || document.getElementById("plyr-ccbtn")) return;
+    const b = document.createElement("button");
+    b.id = "plyr-ccbtn";
+    b.className = "plyr__controls__item plyr__control";
+    b.setAttribute("type", "button");
+    b.setAttribute("aria-label", "Subtitles on/off");
+    b.innerHTML = "<span style='font-weight:800;font-size:13px;" +
+                  "letter-spacing:1px'>CC</span>";
+    b.addEventListener("click", () => {
+      ccOn = !ccOn;
+      ytSetCC(ccOn);
+    });
+    const fs = controls.querySelector('[data-plyr="fullscreen"]');
+    if (fs) controls.insertBefore(b, fs);
+    else controls.appendChild(b);
+  } catch (e) {}
+}
+function syncCCBtn() {
+  const b = document.getElementById("plyr-ccbtn");
+  if (b) {
+    b.classList.toggle("plyr__control--pressed", ccOn);
+    b.style.opacity = ccOn ? "1" : ".4";
+  }
 }
 
 /* v60: drive YouTube captions directly — Plyr's native toggle alone
    doesn't reliably hide YouTube's auto-captions */
 function ytSetCC(on) {
+  syncCCBtn();
   try {
     const yt = plyr && plyr.embed;
     if (!yt || !yt.setOption) return;
@@ -683,10 +703,11 @@ function ytSetCC(on) {
                 || tracks[0];
       if (t && t.languageCode)
         yt.setOption("captions", "track", { languageCode: t.languageCode });
-      else
+      else if (yt.loadModule)
         yt.loadModule("captions");
     } else {
       yt.setOption("captions", "track", {});
+      if (yt.unloadModule) { try { yt.unloadModule("captions"); } catch (e) {} }
     }
   } catch (e) {}
 }
