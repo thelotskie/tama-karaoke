@@ -18,6 +18,11 @@
   #ytwrap { position: fixed; z-index: 1; opacity: 0; transition: opacity .8s;
     width: min(1280px, 94vw, calc(94vh * 16 / 9)); aspect-ratio: 16 / 9;
     left: 50%; top: 50%; transform: translate(-50%, -50%); background: #000; }
+  #ccbtn { position: absolute; top: 8px; right: 8px; z-index: 5;
+    background: rgba(0,0,0,.65); color: #fff; border: 1px solid #ffffff44;
+    border-radius: 6px; padding: 4px 10px; font-size: 13px; font-weight: 800;
+    cursor: pointer; letter-spacing: 1px; }
+  #ccbtn.off { opacity: .4; }
   #ytwrap.on { opacity: 1; }
   #plyr, #plyr .plyr { width: 100%; height: 100%; }
   /* zoom OFF (v36): show the full YouTube frame, nothing cropped.
@@ -625,6 +630,34 @@ function checkVersion() {
 setInterval(checkVersion, 60000);
 setTimeout(checkVersion, 15000);
 
+/* ---------- subtitles/CC toggle (v59) ---------- */
+let ccOn = true;  /* YouTube shows captions by default; tap CC to hide */
+let ccBtnEl = null;
+function ccButton() {
+  if (!ccBtnEl) {
+    ccBtnEl = el("button", "", "CC");
+    ccBtnEl.id = "ccbtn";
+    ccBtnEl.title = "Subtitles on/off";
+    ccBtnEl.addEventListener("click", e => {
+      e.stopPropagation();
+      ccOn = !ccOn;
+      applyCC();
+    });
+  }
+  ccBtnEl.classList.toggle("off", !ccOn);
+  return ccBtnEl;
+}
+function applyCC() {
+  if (ccBtnEl) ccBtnEl.classList.toggle("off", !ccOn);
+  try {
+    const yt = plyr && plyr.embed;
+    if (yt && yt.loadModule) {
+      if (ccOn) yt.loadModule("captions");
+      else yt.unloadModule("captions");
+    }
+  } catch (e) {}
+}
+
 function playVideo(v) {
   if (!/^[A-Za-z0-9_-]{11}$/.test(v.videoId || "")) return;
   try { if (plyr) plyr.destroy(); } catch (e) {}
@@ -638,6 +671,7 @@ function playVideo(v) {
   node.setAttribute("data-plyr-provider", "youtube");
   node.setAttribute("data-plyr-embed-id", v.videoId);
   wrap.appendChild(node);
+  wrap.appendChild(ccButton());  /* v59: subtitles toggle survives reloads */
   plyr = new Plyr("#plyr", {
     autoplay: true,
     controls: ["play-large", "play", "progress", "current-time",
@@ -646,6 +680,7 @@ function playVideo(v) {
     speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
     youtube: { rel: 0, modestbranding: 1, iv_load_policy: 3 }
   });
+  plyr.on("ready", applyCC);  /* v59: re-apply saved subtitle state */
   wirePlayerEvents();
 }
 
