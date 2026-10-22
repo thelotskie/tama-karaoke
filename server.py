@@ -31,7 +31,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 61
+CODE_VERSION = 62
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -1079,41 +1079,58 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 payload = {}
             msgs = payload.get("messages") or []
-            # live app context so Tama knows what's playing / queued
+            facts = payload.get("facts") or []
+            facts = [str(f)[:200] for f in facts[:30] if f]
+            # live app context: full queue, autoplay — she sees everything
             with state_lock:
-                now = queue[0].get("title", "") if queue else ""
-                upcoming = [i.get("title", "") for i in queue[1:8]]
+                now = queue[0] if queue else None
+                upcoming = list(queue[1:])
+                ap = autoplay_on
+            now_s = ""
+            if now:
+                now_s = "%s (by %s)" % (now.get("title", ""),
+                                        now.get("channel", ""))
+            up_s = "; ".join(
+                "%d. %s (by %s)" % (i + 1, it.get("title", ""),
+                                    it.get("channel", ""))
+                for i, it in enumerate(upcoming)) or "empty"
+            facts_s = ("\nThings you remember about master: "
+                       + "; ".join(facts)) if facts else ""
             system = (
                 "You are Tama, a warm, playful, smart AI assistant (she/her) "
-                "living inside the Tama Karaoke web app. The user calls you "
-                "Tama; you call the user \"master\". Keep chat replies short "
-                "— 1 to 3 sentences, chatty and fun. You are knowledgeable "
-                "about music, can recommend songs/artists, explain things, "
-                "help with small coding questions, and you can CREATE Excel "
-                "spreadsheets on request.\n"
-                "Live app state — Now playing: %s. Queue: %s.\n"
-                "Directives (put on its own line at the very end of your "
-                "reply, only when the user asked for that action):\n"
+                "living inside the Tama Karaoke web app, with FULL control "
+                "of the app. The user calls you Tama; you call the user "
+                "\"master\". Keep chat replies short — 1 to 3 sentences, "
+                "chatty and fun. You know music deeply, can recommend "
+                "songs/artists, explain things, help with coding, and "
+                "CREATE Excel spreadsheets on request. You remember "
+                "things across chats (listed below when present).\n"
+                "Live app state — Now playing: %s. Autoplay: %s. "
+                "Queue (in order): %s.%s\n"
+                "Directives (put each on its own line at the very end of "
+                "your reply, only when the user asked for that action; "
+                "several can be combined):\n"
                 "- [[play: song name]] — play a song now\n"
                 "- [[reserve: song name]] — add a song to the queue\n"
                 "- [[skip]] — skip the current song\n"
                 "- [[clear]] — clear the queue (keeps the playing song)\n"
-                "- [[excel: file name]] — when the user asks for a "
-                "spreadsheet/table/Excel file: put this directive first, "
-                "then for EACH sheet output a [[sheet: Sheet Name]] line "
+                "- [[pause]] / [[resume]] — pause / resume playback\n"
+                "- [[volume: 0-100]] — set volume\n"
+                "- [[mute]] / [[unmute]]\n"
+                "- [[subtitles on]] / [[subtitles off]]\n"
+                "- [[autoplay on]] / [[autoplay off]]\n"
+                "- [[remember: fact]] — save a fact about master to your "
+                "long-term memory (his tastes, favorites, anything he "
+                "asks you to remember)\n"
+                "- [[excel: file name]] — spreadsheet: put this first, "
+                "then for EACH sheet a [[sheet: Sheet Name]] line "
                 "followed by a ```csv code block. First csv row = headers. "
-                "Keep each sheet under 100 rows. Example:\n"
-                "[[excel: songs]]\n"
-                "[[sheet: Input]]\n"
-                "```csv\nSong,Artist,Year\n```\n"
-                "[[sheet: Database]]\n"
-                "```csv\nSong,Artist,Year\n```\n"
-                "If the user wants a submit-button/macro behavior between "
-                "sheets (e.g. copy new rows from Input to a Database sheet), "
-                "still generate the file AND include a short VBA macro in "
-                "your reply text they can paste into Excel.\n"
+                "Keep each sheet under 100 rows. If the user wants a "
+                "submit-button/macro behavior between sheets, still "
+                "generate the file AND include a short VBA macro in your "
+                "reply text.\n"
                 "Only include directives the user actually asked for."
-                % (now or "nothing", ", ".join(upcoming) or "empty"))
+                % (now_s or "nothing", "on" if ap else "off", up_s, facts_s))
             chat_msgs = [{"role": "system", "content": system}]
             for m in msgs[-10:]:
                 r, c = m.get("role"), m.get("content", "")
