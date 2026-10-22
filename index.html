@@ -1290,6 +1290,64 @@ async function chatActOnDirective(query, action) {
     else { reserveVideo(hit, null); chatAdd("tama", "✓ Queued “" + hit.title + "”!"); }
   } catch (e) { chatAdd("tama", "Search hiccup — try again?"); }
 }
+/* v64: commands she handles instantly herself — pattern-matched locally,
+   never touching the flaky AI service. Returns true if handled. */
+function localCommand(raw) {
+  const t = raw.toLowerCase().trim().replace(/[!?.\s]+$/, "");
+  const say = (msg) => {
+    chatAdd("tama", msg);
+    chatHistory.push({ role: "assistant", content: msg });
+    return true;
+  };
+  const act = (q, a) => { chatActOnDirective(q, a); return true; };
+
+  if (/^(hi|hello|hey|yo|hi tama|hello tama|hey tama|good (morning|afternoon|evening))$/.test(t))
+    return say("Hey master! 🎤 What are we singing today?");
+  if (t === "thanks" || t === "thank you" || t === "salamat")
+    return say("Anytime, master! 🎶");
+  if (t === "pause" || t === "pause it" || t === "pause the song" || t === "stop")
+    return act("", "pause");
+  if (t === "resume" || t === "continue" || t === "unpause" || t === "play")
+    return act("", "resume");
+  if (t === "skip" || t === "next" || t === "next song" || t === "skip song" || t === "skip this")
+    return act("", "skip");
+  if (t === "clear" || t === "clear queue" || t === "clear the queue")
+    return act("", "clear");
+  if (t === "mute") return act("", "mute");
+  if (t === "unmute" || t === "sound on") return act("", "unmute");
+  const vm = t.match(/^volume (\d{1,3})%?$/);
+  if (vm) return act(vm[1], "volume");
+  if (t === "volume up" || t === "louder") {
+    const v = Math.min(100, Math.round(((plyr && plyr.volume) || 0.8) * 100) + 20);
+    return act(String(v), "volume");
+  }
+  if (t === "volume down" || t === "quieter" || t === "softer") {
+    const v = Math.max(0, Math.round(((plyr && plyr.volume) || 0.8) * 100) - 20);
+    return act(String(v), "volume");
+  }
+  if (t === "subtitles on" || t === "cc on") return act("on", "subtitles");
+  if (t === "subtitles off" || t === "cc off") return act("off", "subtitles");
+  if (t === "autoplay on") return act("on", "autoplay");
+  if (t === "autoplay off") return act("off", "autoplay");
+  if (/^(what'?s|what is) (playing|this song)/.test(t) || t === "now playing") {
+    if (currentVideo)
+      return say("🎵 Now playing: “" + currentVideo.title + "”" +
+        (currentVideo.channel ? " by " + currentVideo.channel : ""));
+    return say("Nothing's playing right now, master.");
+  }
+  if (/queue/.test(t) && /^(what|show|list|see)/.test(t) || t === "queue") {
+    if (!queue.length) return say("The queue is empty, master.");
+    const lines = queue.map((it, i) =>
+      (i === 0 ? "▶ " : (i + ". ")) + it.title);
+    return say("🎶 Queue:\n" + lines.join("\n"));
+  }
+  const pm = raw.match(/^play\s+(.+)$/i);
+  if (pm && pm[1].trim().length > 1) return act(pm[1].trim(), "play");
+  const rm = raw.match(/^(reserve|queue|add)\s+(.+)$/i);
+  if (rm && rm[2].trim().length > 1) return act(rm[2].trim(), "reserve");
+  return false;
+}
+
 async function sendChat() {
   const inp = $("chatinput");
   const text = inp.value.trim();
@@ -1298,6 +1356,8 @@ async function sendChat() {
   chatAdd("user", text);
   chatHistory.push({ role: "user", content: text });
   saveChat();
+  /* v64: instant local commands — no AI call, no hiccups, no waiting */
+  if (localCommand(text)) { saveChat(); return; }
   const typing = chatAdd("tama", "…");
   typing.classList.add("typing");
   let reply = "", chatErr = false;

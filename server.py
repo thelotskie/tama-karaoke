@@ -31,7 +31,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 63
+CODE_VERSION = 64
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -756,30 +756,30 @@ def _pollinations_chat(messages):
             parts.append("Assistant: " + c)
     parts.append("Assistant:")
     prompt = "\n\n".join(parts)
-    url = ("https://text.pollinations.ai/"
-           + urllib.parse.quote(prompt[:4000]))
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "tama-karaoke/1.0",
-        "Accept": "text/plain",
-    })
+    base_url = ("https://text.pollinations.ai/"
+                + urllib.parse.quote(prompt[:4000]))
     text, last_err = "", None
-    for attempt in range(3):  # free API is flaky + slow on cold calls
-        try:
-            with urllib.request.urlopen(req, timeout=25) as r:
-                text = r.read().decode("utf-8", "replace").strip()
-            last_err = None
-            break
-        except Exception as e:
-            last_err = "pollinations_error: %s" % e
-            text = ""
-            if attempt < 2:
+    # two independent model backends; 2 tries each before giving up
+    for model in ("openai", "openai-fast"):
+        url = base_url + "?model=" + model
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "tama-karaoke/1.0",
+            "Accept": "text/plain",
+        })
+        for attempt in range(2):
+            try:
+                with urllib.request.urlopen(req, timeout=25) as r:
+                    text = r.read().decode("utf-8", "replace").strip()
+                if text:
+                    return text, None
+                last_err = "pollinations_error: empty response"
+            except Exception as e:
+                last_err = "pollinations_error: %s" % e
+                text = ""
+            if attempt == 0:
                 import time as _t
-                _t.sleep(1.5)
-    if last_err:
-        return "", last_err
-    if not text:
-        return "", "pollinations_error: empty response"
-    return text, None
+                _t.sleep(1.0)
+    return "", last_err or "pollinations_error: unknown"
 
 
 def youtube_search(q, max_results=15, page_token=None):
