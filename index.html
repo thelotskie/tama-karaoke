@@ -1300,17 +1300,23 @@ async function sendChat() {
   saveChat();
   const typing = chatAdd("tama", "…");
   typing.classList.add("typing");
-  let reply = "";
-  try {
-    const r = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: chatHistory.slice(-12),
-                             facts: tamaFacts }),
-    });
-    const data = await r.json();
-    reply = data.reply || "";
-  } catch (e) { reply = ""; }
+  let reply = "", chatErr = false;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: chatHistory.slice(-12),
+                               facts: tamaFacts }),
+      });
+      const data = await r.json();
+      reply = data.reply || "";
+      chatErr = !!data.error;
+      if (!chatErr && reply) break;
+    } catch (e) { chatErr = true; }
+    if (attempt === 0)  /* one quiet retry before the hiccup message */
+      await new Promise(res => setTimeout(res, 1200));
+  }
   typing.remove();
   if (!reply) reply = "Brain freeze, master — say that again? 🎤";
   chatHistory.push({ role: "assistant", content: reply });

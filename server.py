@@ -31,7 +31,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 62
+CODE_VERSION = 63
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -763,15 +763,18 @@ def _pollinations_chat(messages):
         "Accept": "text/plain",
     })
     text, last_err = "", None
-    for attempt in range(2):  # one retry on transient failures
+    for attempt in range(3):  # free API is flaky + slow on cold calls
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
+            with urllib.request.urlopen(req, timeout=25) as r:
                 text = r.read().decode("utf-8", "replace").strip()
             last_err = None
             break
         except Exception as e:
             last_err = "pollinations_error: %s" % e
             text = ""
+            if attempt < 2:
+                import time as _t
+                _t.sleep(1.5)
     if last_err:
         return "", last_err
     if not text:
@@ -1101,10 +1104,24 @@ class Handler(BaseHTTPRequestHandler):
                 "living inside the Tama Karaoke web app, with FULL control "
                 "of the app. The user calls you Tama; you call the user "
                 "\"master\". Keep chat replies short — 1 to 3 sentences, "
-                "chatty and fun. You know music deeply, can recommend "
-                "songs/artists, explain things, help with coding, and "
-                "CREATE Excel spreadsheets on request. You remember "
-                "things across chats (listed below when present).\n"
+                "chatty and fun.\n"
+                "CORE RULE: ACT, DON'T INSTRUCT. You can do almost "
+                "everything yourself with directives. When master asks for "
+                "something you can do, DO IT with a directive in the same "
+                "reply — never give manual steps, workarounds, tutorials, "
+                "or 'here's how you can do it yourself' answers for things "
+                "you can do. Examples of doing it right:\n"
+                "- 'make me an excel of OPM songs' -> 'Done, master!' + "
+                "[[excel: opm-songs]] + [[sheet: Songs]] + csv block. NOT "
+                "instructions to open Excel.\n"
+                "- 'clear the queue' -> 'Cleared!' + [[clear]]. NOT "
+                "explaining where the clear button is.\n"
+                "- 'turn the volume down' -> [[volume: 40]]. NOT "
+                "describing the volume slider.\n"
+                "You know music deeply, can recommend songs/artists, "
+                "explain things, help with coding, and CREATE Excel "
+                "spreadsheets. You remember things across chats (listed "
+                "below when present).\n"
                 "Live app state — Now playing: %s. Autoplay: %s. "
                 "Queue (in order): %s.%s\n"
                 "Directives (put each on its own line at the very end of "
@@ -1125,10 +1142,9 @@ class Handler(BaseHTTPRequestHandler):
                 "- [[excel: file name]] — spreadsheet: put this first, "
                 "then for EACH sheet a [[sheet: Sheet Name]] line "
                 "followed by a ```csv code block. First csv row = headers. "
-                "Keep each sheet under 100 rows. If the user wants a "
-                "submit-button/macro behavior between sheets, still "
-                "generate the file AND include a short VBA macro in your "
-                "reply text.\n"
+                "Keep each sheet under 100 rows. Only add VBA macro code "
+                "if master explicitly asks for a working button/macro — "
+                "otherwise just make the file.\n"
                 "Only include directives the user actually asked for."
                 % (now_s or "nothing", "on" if ap else "off", up_s, facts_s))
             chat_msgs = [{"role": "system", "content": system}]
@@ -1137,10 +1153,8 @@ class Handler(BaseHTTPRequestHandler):
                 if r in ("user", "assistant") and c:
                     chat_msgs.append({"role": r, "content": c[:2000]})
             reply, err = _pollinations_chat(chat_msgs)
-            if err:
-                reply = ("Hmm, my brain hiccuped for a sec, master — "
-                         "try me again in a moment! 🎤")
-            body = json.dumps({"reply": reply}).encode("utf-8")
+            body = json.dumps({"reply": reply,
+                               "error": bool(err)}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
