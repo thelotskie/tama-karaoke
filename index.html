@@ -1170,12 +1170,17 @@ async function loadMoreRelated() {
   relatedPage++;
   try {
     const exclude = lastRelated.map(it => it.videoId).join(",");
+    /* v80: also send the titles already shown (each encoded) so a
+       later page can't bring back the same SONG under a new video */
+    const extitles = lastRelated.map(it =>
+      encodeURIComponent(it.title || "")).join(",");
     const r = await fetch("/api/related?videoId=" +
       encodeURIComponent(relatedHead.videoId || "") +
       "&channel=" + encodeURIComponent(relatedHead.channel || "") +
       "&title=" + encodeURIComponent(relatedHead.title || "") +
       "&smode=" + encodeURIComponent(searchMode()) +
-      "&more=" + relatedPage + "&exclude=" + encodeURIComponent(exclude));
+      "&more=" + relatedPage + "&exclude=" + encodeURIComponent(exclude) +
+      "&extitles=" + extitles);
     const data = await r.json();
     const items = (data.items || []).filter(it =>
       it.videoId && !lastRelated.some(x => x.videoId === it.videoId));

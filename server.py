@@ -31,7 +31,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 79
+CODE_VERSION = 80
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -394,6 +394,80 @@ def _song_core(title):
         elif depth == 0:
             out.append(ch)
     return "".join(out).strip().lower()
+
+
+# v80: Related must be DIFFERENT songs — the old code deduped only by
+# videoId, so five channels' uploads of the SAME song (and hour-long
+# "greatest hits" albums) filled the list. These helpers give every
+# title a song-identity key and filter the final list with it.
+_LABEL_WORDS = {
+    "karaoke", "version", "lyrics", "lyric", "official", "audio",
+    "video", "hd", "hq", "4k", "remaster", "remastered",
+    "instrumental", "with", "on", "screen", "the", "a", "an",
+    "live", "acoustic", "unplugged", "cover",
+}
+
+
+def _related_key(title):
+    """Song-identity key for a video title: 'The Beatles - Help!
+    (Karaoke Version)', 'Help! - Karaoke - Sing King' and
+    'Help! (Official Audio)' all key to 'help'."""
+    t = title or ""
+    t = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", t)  # drop (...) / [...]
+    parts = [p.strip() for p in
+             re.split(r"\s+[-–—|｜]\s+|\s+\|\s+", t) if p.strip()]
+    artist = _artist_from_title(title).lower()
+    kept = []
+    for p in parts:
+        pl = p.lower()
+        if artist and pl == artist:
+            continue  # the artist segment is not the song
+        if "karaoke" in pl:
+            continue  # a karaoke label segment, not the song
+        kept.append(p)
+    s = " ".join(kept) if kept else t
+    s = re.sub(r"[^a-z0-9 ]", " ", s.lower())
+    toks = [w for w in s.split() if w not in _LABEL_WORDS]
+    key = " ".join(toks)
+    if len(key) < 2:  # stoplist ate everything — fall back to raw
+        key = " ".join(s.split())
+    return key
+
+
+def _dur_seconds(dur):
+    """'1:17:46' / '3:45' -> seconds (0 when unknown)."""
+    try:
+        parts = [int(p) for p in str(dur).split(":")]
+        if len(parts) == 3:
+            return parts[0] * 3600 + parts[1] * 60 + parts[2]
+        if len(parts) == 2:
+            return parts[0] * 60 + parts[1]
+        if len(parts) == 1:
+            return parts[0]
+    except (ValueError, TypeError):
+        pass
+    return 0
+
+
+def _dedupe_related(items, max_seconds=900):
+    """Keep the first video of each distinct song; drop album-length
+    compilations (>15 min — not songs). Unknown duration is kept."""
+    seen_keys, seen_ids, out = set(), set(), []
+    for it in items or []:
+        vid = it.get("videoId")
+        if not vid or vid in seen_ids:
+            continue
+        secs = _dur_seconds(it.get("duration"))
+        if secs and secs > max_seconds:
+            continue
+        key = _related_key(it.get("title"))
+        if key and key in seen_keys:
+            continue
+        seen_ids.add(vid)
+        if key:
+            seen_keys.add(key)
+        out.append(it)
+    return out
 
 
 def channel_uploads(video_id, max_results=12):
@@ -874,6 +948,15 @@ class Handler(BaseHTTPRequestHandler):
             smode = qs.get("smode", ["karaoke"])[0].strip()
             more = qs.get("more", [""])[0].strip()
             exclude = set(x for x in qs.get("exclude", [""])[0].split(",") if x)
+            # v80: titles already on screen (load-more), each one
+            # URL-encoded by the client — their song keys must not
+            # reappear in later pages either
+            extitle_keys = set()
+            for seg in qs.get("extitles", [""])[0].split(","):
+                if seg:
+                    k = _related_key(urllib.parse.unquote(seg))
+                    if k:
+                        extitle_keys.add(k)
             # related follows the search mode: normal -> plain videos,
             # karaoke -> karaoke versions
             k_suffix = "" if smode == "normal" else " karaoke"
@@ -891,7 +974,7 @@ class Handler(BaseHTTPRequestHandler):
                 queries.append(song_q)
                 items, err, used_artist = [], None, False
                 for i, qq in enumerate(queries):
-                    items, err = _scrape_search(qq, max_results=12)
+                    items, err = _scrape_search(qq, max_results=20)
                     if items:
                         used_artist = (i == 0 and bool(artist))
                         break
@@ -990,6 +1073,15 @@ class Handler(BaseHTTPRequestHandler):
                 items = [it for it in items
                          if core_l not in (it.get("title") or "").lower()]
                 random.shuffle(items)
+            # v80 final pass, every path (initial, backfill, channel
+            # fallback, load-more): one video per distinct song,
+            # nothing already on screen by title, no album-length
+            # compilations — Related = different songs, mixed up
+            if extitle_keys:
+                items = [it for it in items
+                         if _related_key(it.get("title"))
+                         not in extitle_keys]
+            items = _dedupe_related(items)
             body = json.dumps({"items": items, "error": err}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
