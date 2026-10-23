@@ -95,6 +95,10 @@
     border-radius: 10px; color: #eef2ff; font-size: 17px; font-weight: 600;
     text-align: center; flex-shrink: 0; position: relative; z-index: 2;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* v67: when paused, the bar says so — a frozen video frame otherwise
+     looks exactly like it's still playing */
+  body.has-video #nowplaying.paused { opacity: .7; }
+  body.has-video #nowplaying.paused #np-title::before { content: "⏸ "; }
   body.has-video #portraitRelated { display: block; order: 3;
     position: relative; z-index: 2; padding: 10px 12px 40px;
     max-width: 1280px; margin: 0 auto; width: 100%; }
@@ -106,12 +110,16 @@
     body.has-video #topbar { position: sticky; top: 0; z-index: 10;
       background: #0a0f1e; }
     body.has-video #ytwrap { position: sticky; top: var(--topbar-h, 60px);
-      z-index: 5; background: #000; margin-top: 0; }
+      z-index: 5; background: #000; margin-top: 0; margin-bottom: 0; }
     /* v66: the title bar sticks under the sticky video instead of
-       scrolling away with the related list */
+       scrolling away with the related list.
+       v67: NO gap — it hugs the player's bottom edge exactly, and a
+       shadow skirt seals the seam so scrolled content can't peek
+       through between the video and the title. */
     body.has-video #nowplaying.on { position: sticky;
-      top: calc(var(--topbar-h, 60px) + min(1280px, 94vw, 72vh * 16 / 9) * 9 / 16 + 12px);
-      z-index: 5; background: rgba(20,28,52,.97); margin-top: 0; }
+      top: calc(var(--topbar-h, 60px) + min(1280px, 94vw, 72vh * 16 / 9) * 9 / 16);
+      z-index: 5; background: rgba(20,28,52,.97); margin-top: 0;
+      box-shadow: 0 -10px 0 rgba(20,28,52,.97); }
     /* panels sit below the sticky video instead of covering it (v35);
        v65: +44px more so they also clear the now-playing title bar */
     body.has-video .panel {
@@ -540,9 +548,11 @@ function setNowPlaying(v) {
   if (v && v.title) {
     $("np-title").textContent =
       v.title + (v.channel ? " — " + v.channel : "");
+    bar.classList.remove("paused"); // a new song starts un-paused
     bar.classList.add("on");
   } else {
     bar.classList.remove("on");
+    bar.classList.remove("paused");
     $("np-title").textContent = "";
   }
 }
@@ -614,6 +624,7 @@ function wirePlayerEvents() {
        blip right after a notification pause: the hold stands. */
     if (!document.hidden) userHold = false;
     if (!userHold) wantPlaying = true;
+    const npb = $("nowplaying"); if (npb) npb.classList.remove("paused");
     showBg(false);
     if (pendingSeek > 0) {
       /* interrupted earlier: resume where it left off, not from 0 */
@@ -628,6 +639,8 @@ function wirePlayerEvents() {
     if (currentVideo) reportNow(currentVideo.videoId, currentVideo.title, "playing");
   });
   plyr.on("pause", () => {
+    /* v67: the title bar shows the paused state (dimmed + ⏸) */
+    const npb = $("nowplaying"); if (npb) npb.classList.add("paused");
     reportProgress(true);
     if (document.hidden && wantPlaying && !fightBackBlocked()) {
       /* YouTube auto-paused on hide — resume immediately. Timers get
