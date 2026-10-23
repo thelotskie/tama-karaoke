@@ -95,7 +95,6 @@
     border-radius: 10px; color: #eef2ff; font-size: 17px; font-weight: 600;
     text-align: center; flex-shrink: 0; position: relative; z-index: 2;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #nowplaying .np-note { color: #ffd166; font-weight: 400; }
   body.has-video #portraitRelated { display: block; order: 3;
     position: relative; z-index: 2; padding: 10px 12px 40px;
     max-width: 1280px; margin: 0 auto; width: 100%; }
@@ -108,6 +107,11 @@
       background: #0a0f1e; }
     body.has-video #ytwrap { position: sticky; top: var(--topbar-h, 60px);
       z-index: 5; background: #000; margin-top: 0; }
+    /* v66: the title bar sticks under the sticky video instead of
+       scrolling away with the related list */
+    body.has-video #nowplaying.on { position: sticky;
+      top: calc(var(--topbar-h, 60px) + min(1280px, 94vw, 72vh * 16 / 9) * 9 / 16 + 12px);
+      z-index: 5; background: rgba(20,28,52,.97); margin-top: 0; }
     /* panels sit below the sticky video instead of covering it (v35);
        v65: +44px more so they also clear the now-playing title bar */
     body.has-video .panel {
@@ -281,7 +285,7 @@
 <body>
 <div id="bg"></div>
 <div id="ytwrap"><div id="plyr"></div></div>
-<div id="nowplaying"><span class="np-note">♪ Now playing&nbsp;</span><span id="np-title"></span></div>
+<div id="nowplaying"><span id="np-title"></span></div>
 
 <div id="topbar">
   <button class="tbtn" id="btn-collapse" title="Hide menu">&lt;</button>
