@@ -31,7 +31,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 80
+CODE_VERSION = 81
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -450,15 +450,18 @@ def _dur_seconds(dur):
 
 
 def _dedupe_related(items, max_seconds=900):
-    """Keep the first video of each distinct song; drop album-length
-    compilations (>15 min — not songs). Unknown duration is kept."""
+    """Keep the first video of each distinct song. max_seconds > 0
+    also drops longer items (album-length compilations in karaoke
+    mode); 0 means no duration cap (normal mode keeps long videos —
+    full concerts and albums are legitimate there). Unknown
+    duration is always kept."""
     seen_keys, seen_ids, out = set(), set(), []
     for it in items or []:
         vid = it.get("videoId")
         if not vid or vid in seen_ids:
             continue
         secs = _dur_seconds(it.get("duration"))
-        if secs and secs > max_seconds:
+        if max_seconds and secs and secs > max_seconds:
             continue
         key = _related_key(it.get("title"))
         if key and key in seen_keys:
@@ -1081,7 +1084,10 @@ class Handler(BaseHTTPRequestHandler):
                 items = [it for it in items
                          if _related_key(it.get("title"))
                          not in extitle_keys]
-            items = _dedupe_related(items)
+            # v81: the >15-min compilation drop is karaoke-only —
+            # in Normal mode long videos stay (concerts, albums)
+            items = _dedupe_related(
+                items, 0 if smode == "normal" else 900)
             body = json.dumps({"items": items, "error": err}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
