@@ -628,6 +628,7 @@ let lastPlayerTapAt = 0; // v74: last tap on the player itself
    handshake. Now every play request funnels into requestPlay():
    at most one play() per 900ms, bounded retries, one owner. */
 let resumeWatchTimer = 0;
+let buffering = false; // v78: set by the player's waiting/playing events
 
 function stopResumeWatch() {
   if (resumeWatchTimer) {
@@ -644,7 +645,10 @@ function requestPlay() {
   let ticks = 0;
   resumeWatchTimer = setInterval(() => {
     ticks++;
-    if (!wantPlaying || userHold || !plyr || !plyr.paused || ticks > 4) {
+    /* v78: don't poke a player that is busy buffering — Plyr reads
+       "paused" during a buffer, but a play() then only disturbs it */
+    if (!wantPlaying || userHold || !plyr || !plyr.paused || buffering
+        || ticks > 4) {
       stopResumeWatch();
       return;
     }
@@ -676,9 +680,24 @@ window.tamaPause = function () {
   wantPlaying = false;
   userPausedAt = Date.now();
   /* pause, then verify it took — retry twice in case the YouTube
-     embed shrugs off the first call (the reported "pause doesn't pause") */
+     embed shrugs off the first call (the reported "pause doesn't pause").
+     v78: the retries MUST re-check the hold before firing. They used
+     to pause unconditionally — and with the app poking tamaPause
+     several times per tap, up to six stale retries rained over the
+     next ~2s, killing any fresh resume that dared to start playing
+     (the real cause of the resume "fight": play -> a leftover retry
+     lands -> pause -> watchdog plays -> another retry lands...).
+     A resume (or a new song) clears the hold, which now disarms
+     every pending retry. */
   const tryPause = () => {
-    try { if (plyr && !plyr.paused) plyr.pause(); } catch (e) {}
+    try {
+      if (plyr && !plyr.paused && userHold) {
+        bglog("PAUSE-RETRY " + bgState());
+        plyr.pause();
+      } else if (plyr && !plyr.paused) {
+        bglog("PAUSE-RETRY-SKIPPED " + bgState());
+      }
+    } catch (e) {}
   };
   tryPause();
   setTimeout(tryPause, 600);
@@ -741,13 +760,14 @@ document.addEventListener("visibilitychange", () => {
 });
 
 function wirePlayerEvents() {
-  plyr.on("waiting", () => { bglog("WAITING " + bgState()); });
+  plyr.on("waiting", () => { buffering = true; bglog("WAITING " + bgState()); });
   plyr.on("ended", () => {
     wantPlaying = false;
     if (currentId && ws && ws.readyState === 1)
       ws.send(JSON.stringify({ t: "ended", id: currentId }));
   });
   plyr.on("playing", () => {
+    buffering = false;
     bglog("PLAYING " + bgState());
     /* v73: while a manual-pause hold stands, a "playing" event is NOT
        the user changing their mind — it is YouTube finishing a buffer
@@ -779,6 +799,7 @@ function wirePlayerEvents() {
     if (currentVideo) reportNow(currentVideo.videoId, currentVideo.title, "playing");
   });
   plyr.on("pause", () => {
+    buffering = false;
     /* v67: the title bar shows the paused state (dimmed + ⏸) */
     const npb = $("nowplaying"); if (npb) npb.classList.add("paused");
     reportProgress(true);
