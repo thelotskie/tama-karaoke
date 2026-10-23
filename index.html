@@ -578,6 +578,13 @@ function reportNow(videoId, title, state) {
   if (ws && ws.readyState === 1)
     ws.send(JSON.stringify({ t: "now", videoId, title, state }));
   bridgeState(state);
+  /* v79: the app's media panel should name the song, not just say
+     "Tama Karaoke" — send the title + channel across the bridge */
+  try {
+    if (window.TamaBridge && TamaBridge.playbackTitle)
+      TamaBridge.playbackTitle(title || "",
+        (currentVideo && currentVideo.channel) || "");
+  } catch (e) {}
 }
 
 /* v72: report STABLE states to the app. In background, YouTube dips
