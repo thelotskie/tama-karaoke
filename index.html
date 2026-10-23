@@ -621,9 +621,37 @@ let userPausedAt = 0; // v51: timestamp of last manual pause (notification)
    guard let the fight-back restart the music after the user paused. */
 let userHold = false;
 let lastPlayerTapAt = 0; // v74: last tap on the player itself
-let lastPlayCmdAt = 0;   // v76: last accepted tamaPlay (dedupe pokes)
-let lastFightAt = 0;     // v76: last fight-back play() (throttle)
-let fightTimer = 0;
+/* v77: single-flight resume. Passes of log review showed one resume
+   tap produced ~6-7 play() calls in 2s from three stacked safety
+   nets (app command repeats, tamaPlay's own retries, the fight
+   loop) — the embed kept getting knocked back to paused mid-
+   handshake. Now every play request funnels into requestPlay():
+   at most one play() per 900ms, bounded retries, one owner. */
+let resumeWatchTimer = 0;
+
+function stopResumeWatch() {
+  if (resumeWatchTimer) {
+    clearInterval(resumeWatchTimer);
+    resumeWatchTimer = 0;
+  }
+}
+
+function requestPlay() {
+  if (!plyr) return;
+  if (resumeWatchTimer) return; // a resume is already in flight
+  bglog("REQPLAY " + bgState());
+  safePlay();
+  let ticks = 0;
+  resumeWatchTimer = setInterval(() => {
+    ticks++;
+    if (!wantPlaying || userHold || !plyr || !plyr.paused || ticks > 4) {
+      stopResumeWatch();
+      return;
+    }
+    bglog("RESUME-RETRY " + bgState());
+    safePlay();
+  }, 900);
+}
 function safePlay() {
   if (!plyr) return;
   try {
@@ -633,36 +661,17 @@ function safePlay() {
 }
 window.tamaPlay = function () {
   bglog("tamaPlay " + bgState());
-  /* v76: the app pokes each command several times (direct + broadcast
-     + timed repeats) and every tamaPlay used to fire its own play()
-     plus two retry timers — on resume the embed got hammered with
-     play commands and flapped pause/play for ~2s (the "fight").
-     A repeat within 1.5s, with no hold standing, adds nothing: a
-     resume is already in flight. (A call WITH a hold always counts —
-     that's a genuine new resume after a pause.) */
-  if (!userHold && Date.now() - lastPlayCmdAt < 1500) return;
-  lastPlayCmdAt = Date.now();
   userHold = false;
-  /* v75: an explicit resume also cancels the "manual pause just
-     happened" window. The BG log showed why resume felt sticky:
-     after a notification pause, userPausedAt kept fightBackBlocked()
-     true for 4s — trailing PAUSE events from the pause command then
-     disarmed the fight-back (wantPlaying=false) even though the user
-     had just pressed play, and only the app's repeated pokes got
-     playback going ~2s later. Resume means resume: clear it. */
+  /* an explicit resume also cancels the "manual pause just happened"
+     window (v75) — resume means resume */
   userPausedAt = 0;
   wantPlaying = true;
-  safePlay();
-  /* v68: after a background pause the embed can shrug off the first
-     play() — retry while we're still paused and the hold is off */
-  const retry = () => {
-    if (wantPlaying && !userHold && plyr && plyr.paused) safePlay();
-  };
-  setTimeout(retry, 800);
-  setTimeout(retry, 2000);
+  /* v77: no play() storm from here — requestPlay owns all retries */
+  requestPlay();
 };
 window.tamaPause = function () {
   bglog("tamaPause " + bgState());
+  stopResumeWatch(); // v77: a pause intent cancels any in-flight resume
   userHold = true;
   wantPlaying = false;
   userPausedAt = Date.now();
@@ -726,12 +735,13 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden && wantPlaying && !fightBackBlocked()) {
     setTimeout(() => {
       if (wantPlaying && !fightBackBlocked() &&
-          document.hidden && plyr && plyr.paused) safePlay();
+          document.hidden && plyr && plyr.paused) requestPlay();
     }, 700);
   }
 });
 
 function wirePlayerEvents() {
+  plyr.on("waiting", () => { bglog("WAITING " + bgState()); });
   plyr.on("ended", () => {
     wantPlaying = false;
     if (currentId && ws && ws.readyState === 1)
@@ -787,26 +797,11 @@ function wirePlayerEvents() {
     const atEnd = plyr && (plyr.ended ||
       (plyr.duration > 0 && plyr.currentTime >= plyr.duration - 1));
     if (wantPlaying && !fightBackBlocked() && !userTap && !atEnd) {
-      /* v76: throttle the fight. A play() already in flight needs a
-         moment to land; answering every flap with another instant
-         play() made the embed bounce pause/play for ~2s on resume.
-         At most one immediate fight per 700ms — anything sooner gets
-         a single deferred re-check instead. */
-      if (Date.now() - lastFightAt >= 700) {
-        lastFightAt = Date.now();
-        bglog("FIGHT " + bgState());
-        safePlay();
-      } else {
-        bglog("FIGHT-WAIT " + bgState());
-        clearTimeout(fightTimer);
-        fightTimer = setTimeout(() => {
-          if (wantPlaying && !fightBackBlocked() && plyr && plyr.paused) {
-            lastFightAt = Date.now();
-            bglog("FIGHT-LATE " + bgState());
-            safePlay();
-          }
-        }, 750);
-      }
+      /* v77: the fight no longer fires play() itself — it asks the
+         single-flight resume, which is already running if a resume
+         is in flight (this very flap is usually part of one). */
+      bglog("FIGHT " + bgState());
+      requestPlay();
     } else {
       wantPlaying = false;
     }
@@ -861,6 +856,7 @@ function applyCC() {
 
 function playVideo(v) {
   if (!/^[A-Za-z0-9_-]{11}$/.test(v.videoId || "")) return;
+  stopResumeWatch(); // v77: a new song supersedes any in-flight resume
   userHold = false; // v65: a new song is a fresh intent to play
   try { if (plyr) plyr.destroy(); } catch (e) {}
   plyr = null;
