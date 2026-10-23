@@ -568,10 +568,29 @@ function setNowPlaying(v) {
 function reportNow(videoId, title, state) {
   if (ws && ws.readyState === 1)
     ws.send(JSON.stringify({ t: "now", videoId, title, state }));
-  /* v68: tell the Android app the player's REAL state, so its
-     notification shows the truth instead of assuming a command worked */
+  bridgeState(state);
+}
+
+/* v72: report STABLE states to the app. In background, YouTube dips
+   into split-second pauses that the fight-back immediately reverses —
+   reporting those made the notification's play/pause button flicker
+   and "lie". A pause is only reported if it is still paused 700ms
+   later; a "playing" report goes out at once and cancels any pending
+   pause report. */
+let bridgePauseTimer = 0;
+function bridgeState(state) {
   try {
-    if (window.TamaBridge) TamaBridge.playbackState(state);
+    if (!window.TamaBridge) return;
+    if (state === "paused") {
+      clearTimeout(bridgePauseTimer);
+      bridgePauseTimer = setTimeout(() => {
+        try { if (window.TamaBridge) TamaBridge.playbackState("paused"); }
+        catch (e) {}
+      }, 700);
+    } else {
+      clearTimeout(bridgePauseTimer);
+      TamaBridge.playbackState(state);
+    }
   } catch (e) {}
 }
 
