@@ -631,6 +631,14 @@ function safePlay() {
 window.tamaPlay = function () {
   bglog("tamaPlay " + bgState());
   userHold = false;
+  /* v75: an explicit resume also cancels the "manual pause just
+     happened" window. The BG log showed why resume felt sticky:
+     after a notification pause, userPausedAt kept fightBackBlocked()
+     true for 4s — trailing PAUSE events from the pause command then
+     disarmed the fight-back (wantPlaying=false) even though the user
+     had just pressed play, and only the app's repeated pokes got
+     playback going ~2s later. Resume means resume: clear it. */
+  userPausedAt = 0;
   wantPlaying = true;
   safePlay();
   /* v68: after a background pause the embed can shrug off the first
