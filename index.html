@@ -87,6 +87,15 @@
     flex-shrink: 0; left: auto; top: auto; transform: none;
     margin: 10px auto; }
   body.has-video #ytwrap:not(.on) { display: none; }
+  /* now-playing title bar directly under the player (v65) */
+  #nowplaying { display: none; }
+  body.has-video #nowplaying.on { display: block; order: 2;
+    width: min(1280px, 94vw); margin: 2px auto 8px; padding: 9px 14px;
+    background: rgba(20,28,52,.88); border: 1px solid #2b3a63;
+    border-radius: 10px; color: #eef2ff; font-size: 17px; font-weight: 600;
+    text-align: center; flex-shrink: 0; position: relative; z-index: 2;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #nowplaying .np-note { color: #ffd166; font-weight: 400; }
   body.has-video #portraitRelated { display: block; order: 3;
     position: relative; z-index: 2; padding: 10px 12px 40px;
     max-width: 1280px; margin: 0 auto; width: 100%; }
@@ -99,23 +108,28 @@
       background: #0a0f1e; }
     body.has-video #ytwrap { position: sticky; top: var(--topbar-h, 60px);
       z-index: 5; background: #000; margin-top: 0; }
-    /* panels sit below the sticky video instead of covering it (v35) */
+    /* panels sit below the sticky video instead of covering it (v35);
+       v65: +44px more so they also clear the now-playing title bar */
     body.has-video .panel {
-      top: calc(var(--topbar-h, 60px) + min(1280px, 94vw, 72vh * 16 / 9) * 9 / 16 + 12px);
+      top: calc(var(--topbar-h, 60px) + min(1280px, 94vw, 72vh * 16 / 9) * 9 / 16 + 56px);
       left: 8px; right: 8px; transform: none; width: auto; }
   }
   /* desktop web: video left, related right with its own scroll (video stays put) */
   @media (min-width: 900px) {
     body.has-video { display: grid;
       grid-template-columns: minmax(0, 1fr) 380px;
-      grid-template-rows: auto minmax(0, 1fr);
+      grid-template-rows: auto auto minmax(0, 1fr);
       height: 100vh; overflow: hidden; }
     body.has-video #topbar { order: 0; grid-column: 1 / -1; grid-row: 1;
       position: relative; }
     body.has-video #ytwrap { order: 0; grid-column: 1; grid-row: 2;
-      width: min(100% - 20px, calc((100vh - 140px) * 16 / 9));
-      margin: 10px auto; align-self: start; justify-self: center; }
-    body.has-video #portraitRelated { order: 0; grid-column: 2; grid-row: 2;
+      width: min(100% - 20px, calc((100vh - 195px) * 16 / 9));
+      margin: 10px auto 0; align-self: start; justify-self: center; }
+    body.has-video #nowplaying.on { order: 0; grid-column: 1; grid-row: 3;
+      align-self: start; justify-self: center;
+      width: min(100% - 20px, calc((100vh - 195px) * 16 / 9));
+      margin: 8px auto 0; }
+    body.has-video #portraitRelated { order: 0; grid-column: 2; grid-row: 2 / -1;
       max-width: none; width: auto; margin: 0; padding: 10px 10px 30px;
       overflow-y: auto; min-height: 0; }
     /* panels dock into the right column instead of covering the video */
@@ -267,6 +281,7 @@
 <body>
 <div id="bg"></div>
 <div id="ytwrap"><div id="plyr"></div></div>
+<div id="nowplaying"><span class="np-note">♪ Now playing&nbsp;</span><span id="np-title"></span></div>
 
 <div id="topbar">
   <button class="tbtn" id="btn-collapse" title="Hide menu">&lt;</button>
@@ -490,6 +505,7 @@ function onQueue(items, autoplay, drain) {
       showBg(true);
       reportNow("", "", "idle");
       $("nowticker").textContent = "Music from YouTube";
+      setNowPlaying(null);
       $("relatedList").innerHTML = "";
       maybeAutoplay();
     }
@@ -498,6 +514,7 @@ function onQueue(items, autoplay, drain) {
   if (head.id !== currentId) {
     currentId = head.id; currentVideo = head;
     $("nowticker").textContent = "♪ " + head.title;
+    setNowPlaying(head);
     try { playVideo(head); } catch (e) {}
     showBg(false);
     pushRecent(head);
@@ -510,6 +527,20 @@ function onControl(action) {
   if (action === "pause") window.tamaPause();
   else if (action === "resume") window.tamaPlay();
   /* "next" arrives as a fresh queue message; nothing to do here */
+}
+
+/* v65: now-playing title bar under the player */
+function setNowPlaying(v) {
+  const bar = $("nowplaying");
+  if (!bar) return;
+  if (v && v.title) {
+    $("np-title").textContent =
+      v.title + (v.channel ? " — " + v.channel : "");
+    bar.classList.add("on");
+  } else {
+    bar.classList.remove("on");
+    $("np-title").textContent = "";
+  }
 }
 
 function reportNow(videoId, title, state) {
@@ -529,6 +560,11 @@ function reportNow(videoId, title, state) {
 let wantPlaying = false;
 let pendingSeek = 0; // resume position for the song now starting
 let userPausedAt = 0; // v51: timestamp of last manual pause (notification)
+/* v65: a MANUAL pause (notification / remote / chat) is absolute — the
+   background fight-back below must never undo it. Only an explicit resume
+   (tamaPlay) or a new song (playVideo) clears the hold. The old 4-second
+   guard let the fight-back restart the music after the user paused. */
+let userHold = false;
 function safePlay() {
   if (!plyr) return;
   try {
@@ -536,11 +572,12 @@ function safePlay() {
     if (p && p.catch) p.catch(() => {});
   } catch (e) {}
 }
-window.tamaPlay = function () { wantPlaying = true; safePlay(); };
+window.tamaPlay = function () { userHold = false; wantPlaying = true; safePlay(); };
 window.tamaPause = function () {
+  userHold = true;
   wantPlaying = false;
   userPausedAt = Date.now();
-  /* v51: pause, then verify it took — retry twice in case the YouTube
+  /* pause, then verify it took — retry twice in case the YouTube
      embed shrugs off the first call (the reported "pause doesn't pause") */
   const tryPause = () => {
     try { if (plyr && !plyr.paused) plyr.pause(); } catch (e) {}
@@ -549,12 +586,13 @@ window.tamaPause = function () {
   setTimeout(tryPause, 600);
   setTimeout(tryPause, 1600);
 };
-/* v51: the auto-resume fight-back must never undo a manual pause */
+/* the auto-resume fight-back must never undo a manual pause */
 function manualPauseRecent() { return Date.now() - userPausedAt < 4000; }
+function fightBackBlocked() { return userHold || manualPauseRecent(); }
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden && wantPlaying && !manualPauseRecent()) {
+  if (document.hidden && wantPlaying && !fightBackBlocked()) {
     setTimeout(() => {
-      if (wantPlaying && !manualPauseRecent() &&
+      if (wantPlaying && !fightBackBlocked() &&
           document.hidden && plyr && plyr.paused) safePlay();
     }, 700);
   }
@@ -567,7 +605,11 @@ function wirePlayerEvents() {
       ws.send(JSON.stringify({ t: "ended", id: currentId }));
   });
   plyr.on("playing", () => {
-    wantPlaying = true;
+    /* a foreground "playing" means the user is here and pressed play —
+       release any manual-pause hold. A hidden one may be a buffering
+       blip right after a notification pause: the hold stands. */
+    if (!document.hidden) userHold = false;
+    if (!userHold) wantPlaying = true;
     showBg(false);
     if (pendingSeek > 0) {
       /* interrupted earlier: resume where it left off, not from 0 */
@@ -583,7 +625,7 @@ function wirePlayerEvents() {
   });
   plyr.on("pause", () => {
     reportProgress(true);
-    if (document.hidden && wantPlaying && !manualPauseRecent()) {
+    if (document.hidden && wantPlaying && !fightBackBlocked()) {
       /* YouTube auto-paused on hide — resume immediately. Timers get
          throttled while the page is hidden, so waiting would stall. */
       safePlay();
@@ -635,6 +677,7 @@ function applyCC() {
 
 function playVideo(v) {
   if (!/^[A-Za-z0-9_-]{11}$/.test(v.videoId || "")) return;
+  userHold = false; // v65: a new song is a fresh intent to play
   try { if (plyr) plyr.destroy(); } catch (e) {}
   plyr = null;
   /* resume where it left off if the server stored a position (>10s in) */
@@ -1231,12 +1274,12 @@ async function chatActOnDirective(query, action) {
     return;
   }
   if (action === "pause") {
-    try { if (plyr) plyr.pause(); } catch (e) {}
+    window.tamaPause(); // v65: sets the hold so background fight-back keeps it paused
     chatAdd("tama", "⏸ Paused!");
     return;
   }
   if (action === "resume") {
-    try { if (plyr) plyr.play(); } catch (e) {}
+    window.tamaPlay();
     chatAdd("tama", "▶ Resumed!");
     return;
   }
