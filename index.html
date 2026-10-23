@@ -87,14 +87,14 @@
     flex-shrink: 0; left: auto; top: auto; transform: none;
     margin: 10px auto; }
   body.has-video #ytwrap:not(.on) { display: none; }
-  /* now-playing title bar directly under the player (v65) */
+  /* now-playing title under the player (v65). v70: PLAIN TEXT, styled
+     exactly like a related video's title (.card .t) — no box, no border,
+     no rounded rectangle (Othelo: keep it simple). */
   #nowplaying { display: none; }
   body.has-video #nowplaying.on { display: block; order: 2;
-    width: min(1280px, 94vw, calc(72vh * 16 / 9)); margin: 2px auto 8px;
-    padding: 9px 14px;
-    background: rgba(20,28,52,.88); border: 1px solid #2b3a63;
-    border-radius: 10px; color: #eef2ff; font-size: 17px; font-weight: 600;
-    text-align: center; flex-shrink: 0; position: relative; z-index: 2;
+    width: min(1280px, 94vw, calc(72vh * 16 / 9)); margin: 8px auto 4px;
+    padding: 0 2px; color: #eef2ff; font-size: 15px; font-weight: 600;
+    text-align: left; flex-shrink: 0; position: relative; z-index: 2;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* v67: when paused, the bar says so — a frozen video frame otherwise
      looks exactly like it's still playing */
@@ -112,16 +112,15 @@
       background: #0a0f1e; }
     body.has-video #ytwrap { position: sticky; top: var(--topbar-h, 60px);
       z-index: 5; background: #000; margin-top: 0; margin-bottom: 0; }
-    /* v66: the title bar sticks under the sticky video instead of
-       scrolling away with the related list.
-       v67: NO gap — it hugs the player's bottom edge exactly.
-       v69: the shadow skirt is GONE — it rendered as a second rounded
-       rectangle stacked on the bar ("doubled"). The measured --video-h
-       offset seals the seam on its own. */
+    /* v66: the title sticks under the sticky video instead of scrolling
+       away with the related list. v70: still plain text — the sticky
+       strip uses the PAGE's own background color (not a box), purely so
+       the text stays readable while content scrolls beneath it. */
     body.has-video #nowplaying.on { position: sticky;
       top: calc(var(--topbar-h, 60px) + var(--video-h,
         calc(min(1280px, 94vw, 72vh * 16 / 9) * 9 / 16)));
-      z-index: 5; background: rgba(20,28,52,.97); margin-top: 0; }
+      z-index: 5; background: #05070f; margin-top: 0;
+      padding-top: 8px; padding-bottom: 6px; }
     /* panels sit below the sticky video instead of covering it (v35);
        v65: +44px more so they also clear the now-playing title bar */
     body.has-video .panel {
