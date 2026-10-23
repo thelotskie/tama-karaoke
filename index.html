@@ -114,14 +114,14 @@
       z-index: 5; background: #000; margin-top: 0; margin-bottom: 0; }
     /* v66: the title bar sticks under the sticky video instead of
        scrolling away with the related list.
-       v67: NO gap — it hugs the player's bottom edge exactly, and a
-       shadow skirt seals the seam so scrolled content can't peek
-       through between the video and the title. */
+       v67: NO gap — it hugs the player's bottom edge exactly.
+       v69: the shadow skirt is GONE — it rendered as a second rounded
+       rectangle stacked on the bar ("doubled"). The measured --video-h
+       offset seals the seam on its own. */
     body.has-video #nowplaying.on { position: sticky;
       top: calc(var(--topbar-h, 60px) + var(--video-h,
         calc(min(1280px, 94vw, 72vh * 16 / 9) * 9 / 16)));
-      z-index: 5; background: rgba(20,28,52,.97); margin-top: 0;
-      box-shadow: 0 -10px 0 rgba(20,28,52,.97); }
+      z-index: 5; background: rgba(20,28,52,.97); margin-top: 0; }
     /* panels sit below the sticky video instead of covering it (v35);
        v65: +44px more so they also clear the now-playing title bar */
     body.has-video .panel {
@@ -682,6 +682,12 @@ function reportProgress(force) {
         ws && ws.readyState === 1 && plyr.currentTime > 5) {
       ws.send(JSON.stringify({ t: "progress", videoId: currentVideo.videoId,
                                time: Math.floor(plyr.currentTime) }));
+    }
+    /* v69: feed the app's media panel a real position + duration —
+       without them its seek indicator sits at 0:00 forever */
+    if (plyr && window.TamaBridge && plyr.duration) {
+      TamaBridge.playbackPosition(Math.floor(plyr.currentTime || 0),
+                                  Math.floor(plyr.duration || 0));
     }
   } catch (e) {}
 }
