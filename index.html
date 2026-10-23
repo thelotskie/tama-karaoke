@@ -94,8 +94,10 @@
   body.has-video #nowplaying.on { display: block; order: 2;
     width: min(1280px, 94vw, calc(72vh * 16 / 9)); margin: 8px auto 4px;
     padding: 0 2px; color: #eef2ff; font-size: 15px; font-weight: 600;
-    text-align: left; flex-shrink: 0; position: relative; z-index: 2;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    text-align: left; flex-shrink: 0; position: relative; z-index: 2; }
+  /* v71: second line exactly like a card's meta (.card .c) */
+  #nowplaying #np-meta { font-size: 13px; color: #8b96bd;
+    margin-top: 4px; font-weight: 400; }
   /* v67: when paused, the bar says so — a frozen video frame otherwise
      looks exactly like it's still playing */
   body.has-video #nowplaying.paused { opacity: .7; }
@@ -122,9 +124,10 @@
       z-index: 5; background: #05070f; margin-top: 0;
       padding-top: 8px; padding-bottom: 6px; }
     /* panels sit below the sticky video instead of covering it (v35);
-       v65: +44px more so they also clear the now-playing title bar */
+       v65: more room to clear the title; v71: the title is now two
+       lines (title + meta, like a card) so panels start lower still */
     body.has-video .panel {
-      top: calc(var(--topbar-h, 60px) + min(1280px, 94vw, 72vh * 16 / 9) * 9 / 16 + 56px);
+      top: calc(var(--topbar-h, 60px) + min(1280px, 94vw, 72vh * 16 / 9) * 9 / 16 + 88px);
       left: 8px; right: 8px; transform: none; width: auto; }
   }
   /* desktop web: video left, related right with its own scroll (video stays put) */
@@ -294,7 +297,7 @@
 <body>
 <div id="bg"></div>
 <div id="ytwrap"><div id="plyr"></div></div>
-<div id="nowplaying"><span id="np-title"></span></div>
+<div id="nowplaying"><div id="np-title"></div><div id="np-meta"></div></div>
 
 <div id="topbar">
   <button class="tbtn" id="btn-collapse" title="Hide menu">&lt;</button>
@@ -547,14 +550,18 @@ function setNowPlaying(v) {
   const bar = $("nowplaying");
   if (!bar) return;
   if (v && v.title) {
-    $("np-title").textContent =
-      v.title + (v.channel ? " — " + v.channel : "");
+    /* v71: exactly like a related card — full title (wraps), then the
+       "Channel • views • uploaded" meta line under it */
+    $("np-title").textContent = v.title;
+    $("np-meta").textContent =
+      [v.channel, v.views, v.published].filter(Boolean).join(" • ");
     bar.classList.remove("paused"); // a new song starts un-paused
     bar.classList.add("on");
   } else {
     bar.classList.remove("on");
     bar.classList.remove("paused");
     $("np-title").textContent = "";
+    $("np-meta").textContent = "";
   }
 }
 
@@ -868,7 +875,8 @@ function videoCard(it) {
 function playNowVideo(v, btn) {
   if (ws && ws.readyState === 1)
     ws.send(JSON.stringify({ t: "playnow", videoId: v.videoId, title: v.title,
-      channel: v.channel, thumb: v.thumb, by: "screen" }));
+      channel: v.channel, thumb: v.thumb, views: v.views || "",
+      published: v.published || "", by: "screen" }));
   if (btn) { btn.textContent = "Playing ▶"; btn.disabled = true; }
   /* hide any open panel (search/queue) so the video is visible */
   document.querySelectorAll(".panel").forEach(p => p.classList.remove("open"));

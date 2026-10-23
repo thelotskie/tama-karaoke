@@ -31,7 +31,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 70
+CODE_VERSION = 71
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -230,6 +230,8 @@ def handle_message(c, msg):
                 "title": msg.get("title", "Unknown"),
                 "channel": msg.get("channel", ""),
                 "thumb": msg.get("thumb", ""),
+                "views": msg.get("views", ""),
+                "published": msg.get("published", ""),
                 "by": c.get("name") or msg.get("by") or "screen",
             })
         broadcast_queue()
