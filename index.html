@@ -90,7 +90,8 @@
   /* now-playing title bar directly under the player (v65) */
   #nowplaying { display: none; }
   body.has-video #nowplaying.on { display: block; order: 2;
-    width: min(1280px, 94vw); margin: 2px auto 8px; padding: 9px 14px;
+    width: min(1280px, 94vw, calc(72vh * 16 / 9)); margin: 2px auto 8px;
+    padding: 9px 14px;
     background: rgba(20,28,52,.88); border: 1px solid #2b3a63;
     border-radius: 10px; color: #eef2ff; font-size: 17px; font-weight: 600;
     text-align: center; flex-shrink: 0; position: relative; z-index: 2;
@@ -117,7 +118,8 @@
        shadow skirt seals the seam so scrolled content can't peek
        through between the video and the title. */
     body.has-video #nowplaying.on { position: sticky;
-      top: calc(var(--topbar-h, 60px) + min(1280px, 94vw, 72vh * 16 / 9) * 9 / 16);
+      top: calc(var(--topbar-h, 60px) + var(--video-h,
+        calc(min(1280px, 94vw, 72vh * 16 / 9) * 9 / 16)));
       z-index: 5; background: rgba(20,28,52,.97); margin-top: 0;
       box-shadow: 0 -10px 0 rgba(20,28,52,.97); }
     /* panels sit below the sticky video instead of covering it (v35);
@@ -560,6 +562,11 @@ function setNowPlaying(v) {
 function reportNow(videoId, title, state) {
   if (ws && ws.readyState === 1)
     ws.send(JSON.stringify({ t: "now", videoId, title, state }));
+  /* v68: tell the Android app the player's REAL state, so its
+     notification shows the truth instead of assuming a command worked */
+  try {
+    if (window.TamaBridge) TamaBridge.playbackState(state);
+  } catch (e) {}
 }
 
 /* ---------- plyr player (YouTube provider) ----------
@@ -586,7 +593,18 @@ function safePlay() {
     if (p && p.catch) p.catch(() => {});
   } catch (e) {}
 }
-window.tamaPlay = function () { userHold = false; wantPlaying = true; safePlay(); };
+window.tamaPlay = function () {
+  userHold = false;
+  wantPlaying = true;
+  safePlay();
+  /* v68: after a background pause the embed can shrug off the first
+     play() — retry while we're still paused and the hold is off */
+  const retry = () => {
+    if (wantPlaying && !userHold && plyr && plyr.paused) safePlay();
+  };
+  setTimeout(retry, 800);
+  setTimeout(retry, 2000);
+};
 window.tamaPause = function () {
   userHold = true;
   wantPlaying = false;
@@ -886,10 +904,15 @@ function applyVideoLayout() {
   const hasVideo =
     document.getElementById("ytwrap").classList.contains("on");
   document.body.classList.toggle("has-video", hasVideo);
-  /* measure topbar so the sticky video sits exactly below it (narrow) */
+  /* measure topbar so the sticky video sits exactly below it (narrow);
+     v68: also measure the REAL video height — the title bar's sticky
+     offset uses it, so the bar hugs the player exactly instead of
+     trusting a CSS formula that can drift a few px on real devices */
   if (hasVideo && window.innerWidth < 900) {
     const h = document.getElementById("topbar").offsetHeight || 60;
     document.body.style.setProperty("--topbar-h", h + "px");
+    const vh = document.getElementById("ytwrap").offsetHeight || 0;
+    if (vh) document.body.style.setProperty("--video-h", vh + "px");
   }
 }
 window.addEventListener("resize", applyVideoLayout);
