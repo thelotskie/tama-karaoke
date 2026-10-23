@@ -646,6 +646,11 @@ window.tamaPause = function () {
 /* the auto-resume fight-back must never undo a manual pause */
 function manualPauseRecent() { return Date.now() - userPausedAt < 4000; }
 function fightBackBlocked() { return userHold || manualPauseRecent(); }
+
+/* v73: a real tap on the player itself (Plyr's controls / video area)
+   is the user taking manual control — release the manual-pause hold.
+   #ytwrap persists across songs, so this is wired once. */
+$("ytwrap").addEventListener("pointerdown", () => { userHold = false; });
 document.addEventListener("visibilitychange", () => {
   if (document.hidden && wantPlaying && !fightBackBlocked()) {
     setTimeout(() => {
@@ -662,11 +667,21 @@ function wirePlayerEvents() {
       ws.send(JSON.stringify({ t: "ended", id: currentId }));
   });
   plyr.on("playing", () => {
-    /* a foreground "playing" means the user is here and pressed play —
-       release any manual-pause hold. A hidden one may be a buffering
-       blip right after a notification pause: the hold stands. */
-    if (!document.hidden) userHold = false;
-    if (!userHold) wantPlaying = true;
+    /* v73: while a manual-pause hold stands, a "playing" event is NOT
+       the user changing their mind — it is YouTube finishing a buffer
+       it was in the middle of when the pause landed (pause-during-
+       buffering gets ignored, then playback starts on its own ~2-3s
+       later; the old code mistook that for a foreground play, cleared
+       the hold, and the song "un-paused itself"). Re-pause at once.
+       The hold now clears ONLY via tamaPlay (notification/chat/remote
+       resume), playVideo (new song), or a real tap on the player. */
+    if (userHold) {
+      try { plyr.pause(); } catch (e) {}
+      const npb2 = $("nowplaying"); if (npb2) npb2.classList.add("paused");
+      if (currentVideo) reportNow(currentVideo.videoId, currentVideo.title, "paused");
+      return;
+    }
+    wantPlaying = true;
     const npb = $("nowplaying"); if (npb) npb.classList.remove("paused");
     showBg(false);
     if (pendingSeek > 0) {
