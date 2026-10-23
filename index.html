@@ -339,6 +339,7 @@
   <div class="phead" id="queuehead">
     <button id="skipbtn">Skip this song &#9199;</button>
     <button id="clearbtn" onclick="clearQueue()">&#128465; Clear queue</button>
+    <button id="bglogbtn">&#128027; BG log</button>
   </div>
   <div class="pbody">
     <div id="qlist"></div>
@@ -369,6 +370,14 @@
   <p>Tap once to start &mdash; this unlocks sound for autoplay</p>
   <button id="startbtn">TAP TO START</button>
   <div id="connstate">not connected</div>
+</div>
+
+<div id="bglogview" style="display:none;position:fixed;inset:0;z-index:200;background:#05070f;padding:14px;box-sizing:border-box">
+  <div style="display:flex;gap:8px;margin-bottom:10px">
+    <button id="bglogcopy" style="flex:1">Copy log</button>
+    <button id="bglogclose" style="flex:1">Close</button>
+  </div>
+  <textarea id="bglogtext" readonly style="width:100%;height:85%;box-sizing:border-box;background:#0b1020;color:#cfe3ff;font:11px monospace"></textarea>
 </div>
 
 <script>
@@ -611,6 +620,7 @@ let userPausedAt = 0; // v51: timestamp of last manual pause (notification)
    (tamaPlay) or a new song (playVideo) clears the hold. The old 4-second
    guard let the fight-back restart the music after the user paused. */
 let userHold = false;
+let lastPlayerTapAt = 0; // v74: last tap on the player itself
 function safePlay() {
   if (!plyr) return;
   try {
@@ -619,6 +629,7 @@ function safePlay() {
   } catch (e) {}
 }
 window.tamaPlay = function () {
+  bglog("tamaPlay " + bgState());
   userHold = false;
   wantPlaying = true;
   safePlay();
@@ -631,6 +642,7 @@ window.tamaPlay = function () {
   setTimeout(retry, 2000);
 };
 window.tamaPause = function () {
+  bglog("tamaPause " + bgState());
   userHold = true;
   wantPlaying = false;
   userPausedAt = Date.now();
@@ -650,8 +662,47 @@ function fightBackBlocked() { return userHold || manualPauseRecent(); }
 /* v73: a real tap on the player itself (Plyr's controls / video area)
    is the user taking manual control — release the manual-pause hold.
    #ytwrap persists across songs, so this is wired once. */
-$("ytwrap").addEventListener("pointerdown", () => { userHold = false; });
+$("ytwrap").addEventListener("pointerdown", () => {
+  userHold = false;
+  lastPlayerTapAt = Date.now();
+});
+
+/* v74 diagnostics: a timestamped log of the background-playback
+   machinery (Queue panel -> BG log) so a bad background session can
+   be diagnosed from facts instead of guesses. */
+const BGLOG = [];
+function bglog(msg) {
+  try {
+    const d = new Date();
+    const p2 = (n) => ("0" + n).slice(-2);
+    BGLOG.push(p2(d.getHours()) + ":" + p2(d.getMinutes()) + ":" +
+               p2(d.getSeconds()) + " " + msg);
+    if (BGLOG.length > 400) BGLOG.shift();
+  } catch (e) {}
+}
+function bgState() {
+  return "hidden=" + document.hidden + " want=" + wantPlaying +
+         " hold=" + userHold + " paused=" + (plyr ? plyr.paused : "?") +
+         " t=" + (plyr ? Math.floor(plyr.currentTime || 0) : -1);
+}
+$("bglogbtn").addEventListener("click", () => {
+  $("bglogtext").value = BGLOG.join("\n") || "(empty)";
+  $("bglogview").style.display = "block";
+});
+$("bglogclose").addEventListener("click", () => {
+  $("bglogview").style.display = "none";
+});
+$("bglogcopy").addEventListener("click", () => {
+  const ta = $("bglogtext");
+  ta.select();
+  try { navigator.clipboard.writeText(ta.value); } catch (e) {}
+  try { document.execCommand("copy"); } catch (e) {}
+  $("bglogcopy").textContent = "Copied ✓";
+  setTimeout(() => { $("bglogcopy").textContent = "Copy log"; }, 1500);
+});
+bglog("START " + bgState());
 document.addEventListener("visibilitychange", () => {
+  bglog("VIS " + bgState());
   if (document.hidden && wantPlaying && !fightBackBlocked()) {
     setTimeout(() => {
       if (wantPlaying && !fightBackBlocked() &&
@@ -667,6 +718,7 @@ function wirePlayerEvents() {
       ws.send(JSON.stringify({ t: "ended", id: currentId }));
   });
   plyr.on("playing", () => {
+    bglog("PLAYING " + bgState());
     /* v73: while a manual-pause hold stands, a "playing" event is NOT
        the user changing their mind — it is YouTube finishing a buffer
        it was in the middle of when the pause landed (pause-during-
@@ -700,9 +752,22 @@ function wirePlayerEvents() {
     /* v67: the title bar shows the paused state (dimmed + ⏸) */
     const npb = $("nowplaying"); if (npb) npb.classList.add("paused");
     reportProgress(true);
-    if (document.hidden && wantPlaying && !fightBackBlocked()) {
-      /* YouTube auto-paused on hide — resume immediately. Timers get
-         throttled while the page is hidden, so waiting would stall. */
+    bglog("PAUSE " + bgState());
+    /* v74: fight ANY pause the user didn't ask for — not only ones
+       where document.hidden is true. The old condition had a hole:
+       a YouTube dip while the page reported "visible" (shade up,
+       overlay quirks) was filed as a user pause and DISARMED the
+       fight-back (wantPlaying=false), leaving the song stalled
+       until something unrelated restarted it. A pause counts as
+       the user's own only when a manual hold stands, a manual pause
+       just happened, the player itself was tapped in the last 1.5s
+       (its own pause button / seek bar), or the song has ended.
+       Everything else gets fought, hidden or not. */
+    const userTap = Date.now() - lastPlayerTapAt < 1500;
+    const atEnd = plyr && (plyr.ended ||
+      (plyr.duration > 0 && plyr.currentTime >= plyr.duration - 1));
+    if (wantPlaying && !fightBackBlocked() && !userTap && !atEnd) {
+      bglog("FIGHT " + bgState());
       safePlay();
     } else {
       wantPlaying = false;
@@ -731,7 +796,7 @@ function reportProgress(force) {
     }
   } catch (e) {}
 }
-setInterval(() => reportProgress(false), 10000);
+setInterval(() => { reportProgress(false); bglog("HB " + bgState()); }, 10000);
 window.addEventListener("beforeunload", () => reportProgress(true));
 
 /* proactive version check: the websocket only pushes code_version on messages,
