@@ -31,7 +31,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 82
+CODE_VERSION = 83
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -371,6 +371,27 @@ def _artist_from_title(title):
         if cand and "karaoke" not in cand.lower():
             return cand
     return ""
+
+
+def _artist_from_channel(channel):
+    """Artist name from the channel, for bare-title uploads — 'Alapaap'
+    by 'Eraserheads - Topic' has no artist in the title at all (v83).
+    YouTube auto-channels are '<Artist> - Topic' and VEVO channels are
+    '<Artist>VEVO'; a plain channel name counts too unless it looks
+    like a label/network/karaoke channel. Returns "" when unsure."""
+    c = (channel or "").strip()
+    if not c:
+        return ""
+    low = c.lower()
+    if low.endswith(" - topic"):
+        return c[:-len(" - topic")].strip()
+    if low.endswith("vevo"):
+        return c[:-len("vevo")].strip(" -")
+    for word in ("karaoke", "music", "record", "entertainment",
+                 "network", "productions", "studios", "official"):
+        if word in low:
+            return ""
+    return c
 
 
 def _song_core(title):
@@ -1219,7 +1240,12 @@ class Handler(BaseHTTPRequestHandler):
                 # primary: artist-based "<artist>[ karaoke]" via the free
                 # no-key scrape (0 quota) — different songs by the same
                 # artist, YouTube-radio style, not 10 copies of one song
-                artist = _artist_from_title(title)
+                # v83: bare titles ("Alapaap") carry no artist — take it
+                # from the channel ("Eraserheads - Topic") or Related
+                # searches the song itself and the same-song filter
+                # below deletes every result, leaving the panel empty
+                artist = (_artist_from_title(title)
+                          or _artist_from_channel(channel))
                 if k_suffix and "karaoke" not in title.lower():
                     song_q = title + k_suffix
                 else:
@@ -1281,7 +1307,8 @@ class Handler(BaseHTTPRequestHandler):
                 # infinite scroll: cycle through query variations for more
                 # videos — wraps around so it keeps going; exclude filters
                 # already-shown so we never repeat
-                artist = _artist_from_title(title)
+                artist = (_artist_from_title(title)
+                          or _artist_from_channel(channel))
                 # v48: when no artist is in the title ("Song (Karaoke)"
                 # style uploads), fall back to the channel — a karaoke
                 # channel's catalog is different songs in the same genre,
@@ -1327,6 +1354,21 @@ class Handler(BaseHTTPRequestHandler):
                 items = [it for it in items
                          if core_l not in (it.get("title") or "").lower()]
                 random.shuffle(items)
+            # v83: if the same-song filter just emptied the list (the
+            # bare-title trap: every result was the playing song under
+            # another upload), fall back to the channel's other uploads
+            # instead of answering "No related videos found"
+            if not items and video_id:
+                items, err = channel_uploads(video_id)
+                if _key_limited(err):
+                    items, err = _scrape_search(
+                        (channel + k_suffix).strip() if channel else "",
+                        max_results=12)
+                if items and core and len(core) >= 3:
+                    cl = core.lower()
+                    items = [it for it in items
+                             if cl not in (it.get("title") or "")
+                             .lower()]
             # v80 final pass, every path (initial, backfill, channel
             # fallback, load-more): one video per distinct song,
             # nothing already on screen by title, no album-length
