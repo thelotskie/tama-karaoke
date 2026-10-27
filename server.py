@@ -31,7 +31,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 BASE = os.path.dirname(os.path.abspath(__file__))
 WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # bump on every deploy: clients auto-reload when the server has newer code
-CODE_VERSION = 81
+CODE_VERSION = 82
 
 def public_ws_url():
     """The ws(s) URL remote apps pair with. On Render use the public host."""
@@ -817,6 +817,233 @@ def build_xlsx(rows, sheet_name="Sheet1"):
     return buf.getvalue()
 
 
+def _artist_match(artist, it):
+    """v82: is this video actually BY the artist? (Mirrors the client's
+    _artistMatch — artist searches also return other bands' songs that
+    share the artist's name as a title.)"""
+    import unicodedata
+
+    def norm(s):
+        s = unicodedata.normalize("NFD", (s or "").lower())
+        return "".join(c for c in s if not unicodedata.combining(c))
+
+    a = norm(artist).strip()
+    if not a:
+        return True
+    title = norm(it.get("title"))
+    ch = norm(it.get("channel"))
+    if ch and (ch == a or a in ch):
+        return True
+    first = title.split(" - ")[0].strip()
+    if first == a or first.startswith(a + " "):
+        return True
+    if (" by " + a) in title:
+        return True
+    if " " in a:
+        parts = title.split(" - ")
+        if len(parts) > 1:
+            last = re.sub(r"\([^)]*\)|\[[^\]]*\]", "",
+                          parts[-1]).strip()
+            if last == a or last.startswith(a + " "):
+                return True
+    return False
+
+
+def _bulk_artists(topic):
+    """v82: genre -> artist roster for bulk-queue expansion (mirrors the
+    client's _bulkArtists). Era acts first, so a 90s/2000s ask fills
+    from them before newer artists top it up."""
+    low = (topic or "").lower()
+    if re.search(r"\b(opm|filipino|pinoy|tagalog)\b", low):
+        return ["Eraserheads", "Rivermaya", "Parokya ni Edgar", "Teeth",
+                "The Dawn", "True Faith", "Introvoys",
+                "APO Hiking Society", "Hotdog", "Bamboo", "Kamikazee",
+                "Hale", "Moonstar88", "Itchyworms", "Sugarfree",
+                "6cyclemind", "Cueshe", "Sandwich", "Aegis", "MYMP",
+                "Nina", "Jaya", "Regine Velasquez", "Gary Valenciano",
+                "Sarah Geronimo", "Moira Dela Torre", "Ben&Ben",
+                "IV of Spades", "Cup of Joe", "Zack Tabudlo"]
+    if re.search(r"\bk-?pop\b", low):
+        return ["BTS", "BLACKPINK", "TWICE", "SEVENTEEN", "Stray Kids",
+                "NewJeans", "EXO", "Red Velvet", "IU", "BIGBANG", "PSY",
+                "Super Junior"]
+    return []
+
+
+def _chat_command_fallback(text):
+    """v82: deterministic chat commands. Queue/play requests must NEVER
+    depend on the flaky LLM — Pollinations took >90s on "queue 20 OPM
+    songs" (it tries to compose a long list), every retry timed out,
+    and the app answered "Brain freeze". This parser mirrors the
+    client's localCommand bulk parser and answers instantly with
+    directives built from REAL YouTube search hits. Returns "" when
+    the message is not a command she can do herself."""
+    s = (text or "").strip()
+    if not s:
+        return ""
+    s = re.sub(r"^\s*(hey\s+|hi\s+)?tama\b[\s,:!-]*", "", s,
+               flags=re.I).strip()
+    s = re.sub(r"^\s*please\b[\s,]*", "", s, flags=re.I).strip()
+    low = s.lower().strip(" !?.")
+    if low in ("skip", "next", "next song", "skip song", "skip this"):
+        return "Skipped, master! [[skip]]"
+    if low in ("clear", "clear queue", "clear the queue"):
+        return "Cleared, master! [[clear]]"
+    if low in ("pause", "pause it", "pause the song"):
+        return "Paused, master! [[pause]]"
+    if low in ("resume", "continue", "unpause"):
+        return "Resumed, master! [[resume]]"
+    if re.match(r"^(what|who|why|how|when|explain|tell me about)\b", low):
+        return ""  # a question — that's the LLM's job
+    has_plural = bool(re.search(r"\bsongs\b|\btracks\b", low))
+    has_song_word = bool(re.search(r"\bsongs?\b|\btracks?\b", low))
+    count = None
+    m = (re.search(r"\b(\d{1,2})\s+(?:songs?|tracks?)\b", s, re.I)
+         or re.search(r"^(\d{1,2})\b[^.!?]*\b(?:songs?|tracks?)\b", s, re.I)
+         or re.search(r"^(?:queue|reserve|add|play|load|give me|get me|put)"
+                      r"\s+(\d{1,2})\b(?![\d'’s])", s, re.I))
+    if m:
+        count = int(m.group(1))
+    if has_song_word and (count is not None or has_plural):
+        if count is None:
+            count = 10
+        count = max(1, min(30, count))
+        karaoke = bool(re.search(r"\bkaraoke\b", s, re.I))
+        topic = s
+        topic = re.sub(r"^(give|get)\s+me\b", " ", topic, flags=re.I)
+        topic = re.sub(r"^(queue|reserve|add|play|load|put)\b", " ",
+                       topic, flags=re.I)
+        topic = re.sub(r"\b\d{1,2}\s+(?:songs?|tracks?)\b", " ",
+                       topic, flags=re.I)
+        topic = re.sub(r"^\s*\d{1,2}\b(?=\s)", " ", topic)
+        topic = re.sub(r"\b(?:songs?|tracks?)\b", " ", topic, flags=re.I)
+        topic = re.sub(r"\bnormal\b|\bkaraoke\b|\bplease\b", " ",
+                       topic, flags=re.I)
+        topic = re.sub(r"(\d{4})['’]e\b", r"\1s", topic)
+        topic = re.sub(r"\s+", " ", topic).strip(" ,")
+        topic = re.sub(r"^(of|some|the)\s+", "", topic,
+                       flags=re.I).strip()
+        if not topic:
+            return ""
+        suffix = " karaoke" if karaoke else ""
+        picked, seen_ids, seen_keys, seen_alt = [], set(), set(), set()
+
+        def alt_key(title):
+            # ALL title tokens sorted (no artist removal — _related_key
+            # drops the first segment as "artist", which flips when a
+            # title swaps artist/song order): catches "Wag Mo Na Sana -
+            # Parokya Ni Edgar" vs "Parokya Ni Edgar - Wag Mo Na Sana"
+            t = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", title or "")
+            t = re.sub(r"[^a-z0-9 ]", " ", t.lower())
+            toks = [w for w in t.split() if w not in _LABEL_WORDS]
+            return " ".join(sorted(toks))
+
+        def is_single(it):
+            vid = it.get("videoId")
+            if not vid or vid in seen_ids:
+                return False
+            key = _related_key(it.get("title"))
+            if key and key in seen_keys:
+                return False  # same song, another channel's upload
+            alt = alt_key(it.get("title"))
+            if alt and alt in seen_alt:
+                return False
+            secs = _dur_seconds(it.get("duration"))
+            if secs and secs > 600:
+                return False  # too long for a single — a compilation
+            if re.search(r"\b(nonstop|non-stop|medley|playlist|"
+                         r"compilation|greatest hits|collection|"
+                         r"full album)\b", it.get("title") or "", re.I):
+                return False
+            # fan-junk that floods one-word artist names (Teeth, Hale…)
+            if re.search(r"\b(amv|animatic|nightcore|sped up|slowed|"
+                         r"bass boost|8d audio|fanmade|fan made|gacha)\b",
+                         it.get("title") or "", re.I):
+                return False
+            if not karaoke and re.search(r"\binstrumental\b",
+                                         it.get("title") or "", re.I):
+                return False
+            return True
+
+        def take(it):
+            seen_ids.add(it.get("videoId"))
+            key = _related_key(it.get("title"))
+            if key:
+                seen_keys.add(key)
+            alt = alt_key(it.get("title"))
+            if alt:
+                seen_alt.add(alt)
+            picked.append(it)
+
+        def search(q):
+            items, _err = _scrape_search(q, max_results=20)
+            if not items:
+                items, _err, _tok = youtube_search(q, max_results=20)
+            return items or []
+
+        def topic_pass():
+            for v in [topic, topic + " official audio", topic + " songs",
+                      topic + " live"]:
+                if len(picked) >= count:
+                    break
+                for it in search(v + suffix):
+                    if len(picked) < count and is_single(it):
+                        take(it)
+
+        def artist_pass(artists):
+            # one-artist searches return real singles where topic
+            # searches return compilations; round-robin keeps it mixed
+            pools = []
+            for a in artists[:10]:
+                if len(picked) >= count:
+                    break
+                q = (a + suffix) if karaoke else a + " songs official audio"
+                pool = [it for it in search(q)
+                        if is_single(it) and _artist_match(a, it)]
+                if pool:
+                    pools.append(pool)
+                have = sum(len(p) for p in pools)
+                if len(picked) + have >= count and len(pools) >= 5:
+                    break
+            rnd = 0
+            added = True
+            while len(picked) < count and added:
+                added = False
+                for p in pools:
+                    if len(picked) >= count:
+                        break
+                    if rnd < len(p) and is_single(p[rnd]):
+                        take(p[rnd])
+                        added = True
+                rnd += 1
+
+        # roster topics (OPM…) fill from real artists FIRST — generic
+        # topic searches are compilation/keyword-spam magnets and only
+        # top up what the artists couldn't fill
+        artists = _bulk_artists(topic)
+        if artists:
+            artist_pass(artists)
+            topic_pass()
+        else:
+            topic_pass()
+        if not picked:
+            return ""
+        lines = ["Queued %d %s songs, master! 🎶"
+                 % (len(picked), topic)]
+        for it in picked:
+            title = (it.get("title") or "").replace("]", " ").strip()
+            if title:
+                lines.append("[[reserve: %s]]" % title)
+        return "\n".join(lines)
+    m = re.match(r"^(play)\s+(.+)$", s, re.I)
+    if m and len(m.group(2).strip()) > 1:
+        return "Playing it now, master! [[play: %s]]" % m.group(2).strip()
+    m = re.match(r"^(reserve|queue|add)\s+(.+)$", s, re.I)
+    if m and len(m.group(2).strip()) > 1:
+        return "Queued, master! [[reserve: %s]]" % m.group(2).strip()
+    return ""
+
+
 def _pollinations_chat(messages):
     """Free no-key LLM chat (Pollinations GET endpoint).
     Returns (reply_text, error)."""
@@ -830,10 +1057,15 @@ def _pollinations_chat(messages):
         if r == "system":
             parts.append("Instructions: " + c)
         elif r == "user":
-            parts.append("User: " + c)
+            parts.append("User: " + c[:600])
         else:
-            parts.append("Assistant: " + c)
+            parts.append("Assistant: " + c[:600])
     parts.append("Assistant:")
+    # v82: the old prompt[:4000] cut could slice off the NEWEST user
+    # message (long system prompt + history) — drop the OLDEST history
+    # turns instead, always keeping instructions + latest turns intact
+    while len(parts) > 3 and len("\n\n".join(parts)) > 3900:
+        parts.pop(1)
     prompt = "\n\n".join(parts)
     base_url = ("https://text.pollinations.ai/"
                 + urllib.parse.quote(prompt[:4000]))
@@ -849,6 +1081,25 @@ def _pollinations_chat(messages):
             try:
                 with urllib.request.urlopen(req, timeout=25) as r:
                     text = r.read().decode("utf-8", "replace").strip()
+                # v82: Pollinations sometimes answers with a raw API
+                # JSON blob ({"role":…,"reasoning":…}) instead of the
+                # reply text — never show master that junk; unwrap a
+                # real content field when there is one, else treat it
+                # as an empty response and let the retry/fallback run
+                if text.startswith("{"):
+                    try:
+                        blob = json.loads(text)
+                        inner = ""
+                        if isinstance(blob, dict):
+                            ch = blob.get("choices") or []
+                            if ch:
+                                inner = ((ch[0].get("message") or {})
+                                         .get("content") or "")
+                            if not inner:
+                                inner = blob.get("content") or ""
+                        text = (inner or "").strip()
+                    except ValueError:
+                        pass
                 if text:
                     return text, None
                 last_err = "pollinations_error: empty response"
@@ -1228,7 +1479,12 @@ class Handler(BaseHTTPRequestHandler):
                 "your reply, only when the user asked for that action; "
                 "several can be combined):\n"
                 "- [[play: song name]] — play a song now\n"
-                "- [[reserve: song name]] — add a song to the queue\n"
+                "- [[reserve: song name]] — add a song to the queue. "
+                "If master asks for N songs of a genre/artist/era "
+                "(e.g. 'queue 20 OPM songs'), emit N [[reserve: ...]] "
+                "lines, one per song, using REAL well-known songs that "
+                "fit (artist - title). Never refuse, never say you can "
+                "only queue one.\n"
                 "- [[skip]] — skip the current song\n"
                 "- [[clear]] — clear the queue (keeps the playing song)\n"
                 "- [[pause]] / [[resume]] — pause / resume playback\n"
@@ -1252,7 +1508,17 @@ class Handler(BaseHTTPRequestHandler):
                 r, c = m.get("role"), m.get("content", "")
                 if r in ("user", "assistant") and c:
                     chat_msgs.append({"role": r, "content": c[:2000]})
-            reply, err = _pollinations_chat(chat_msgs)
+            # v82: commands she can do herself never wait on the LLM
+            last_user = ""
+            for m in reversed(msgs):
+                if m.get("role") == "user" and m.get("content"):
+                    last_user = m["content"]
+                    break
+            fast = _chat_command_fallback(last_user)
+            if fast:
+                reply, err = fast, None
+            else:
+                reply, err = _pollinations_chat(chat_msgs)
             body = json.dumps({"reply": reply,
                                "error": bool(err)}).encode("utf-8")
             self.send_response(200)

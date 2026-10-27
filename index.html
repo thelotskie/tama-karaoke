@@ -1552,10 +1552,226 @@ async function chatActOnDirective(query, action) {
     else { reserveVideo(hit, null); chatAdd("tama", "✓ Queued “" + hit.title + "”!"); }
   } catch (e) { chatAdd("tama", "Search hiccup — try again?"); }
 }
+/* v82: bulk queue — "queue 20 songs opm", "20 opm songs", "Tama queue 20
+   songs opm normal Filipino band 90's and 2000s". Parsed and loaded
+   LOCALLY by searching YouTube herself, so a queue request can never
+   die on the flaky AI brain again (the "Brain freeze" bug Othelo hit:
+   the old parser needed the line to START with queue/reserve and could
+   only ever queue ONE song, so bulk requests fell through to the LLM,
+   which timed out and left her speechless). */
+function _bulkTitleKey(title) {
+  let s = (title || "").toLowerCase();
+  s = s.replace(/\([^)]*\)|\[[^\]]*\]/g, " ");
+  s = s.replace(/\b(official|audio|video|lyrics?|hd|hq|4k|remaster(ed)?|music|mv)\b/g, " ");
+  s = s.replace(/[^a-z0-9 ]/g, " ");
+  return s.replace(/\s+/g, " ").trim();
+}
+function _bulkDurSecs(d) {
+  const p = String(d || "").split(":").map(x => parseInt(x, 10));
+  if (p.some(isNaN)) return 0;
+  if (p.length === 3) return p[0] * 3600 + p[1] * 60 + p[2];
+  if (p.length === 2) return p[0] * 60 + p[1];
+  if (p.length === 1) return p[0];
+  return 0;
+}
+async function chatQueueMany(topic, count, mode) {
+  const note = (msg) => {
+    chatAdd("tama", msg);
+    chatHistory.push({ role: "assistant", content: msg });
+    saveChat();
+  };
+  if (!ws || ws.readyState !== 1) {
+    note("I'm not connected to the player yet, master — tap TAP TO START first, then ask me again 🎤");
+    return;
+  }
+  /* if master named a mode ("normal" / "karaoke"), switch the app to it
+     so later searches agree with what he asked for */
+  try {
+    const r = document.querySelector('input[name="smode"][value="' + mode + '"]');
+    if (r && !r.checked) { r.checked = true; r.dispatchEvent(new Event("change")); }
+  } catch (e) {}
+  note("🎶 On it, master — queuing " + count + " " + topic +
+       " songs (" + mode + " mode)…");
+  const suffix = mode === "karaoke" ? " karaoke" : "";
+  const seenId = new Set(queue.map(q => q.videoId));
+  const seenKey = new Set(queue.map(q => _bulkTitleKey(q.title)));
+  /* alt key = same tokens sorted: catches "Wag Mo Na Sana - Parokya Ni
+     Edgar" vs "Parokya Ni Edgar - Wag Mo Na Sana" (same song, swapped) */
+  const altKey = (t) => _bulkTitleKey(t).split(" ").filter(Boolean)
+                          .sort().join(" ");
+  const seenAlt = new Set(queue.map(q => altKey(q.title)));
+  const picked = [];
+  /* one REAL single: right length, and not a compilation/medley —
+     generic topic searches are compilation magnets, so titles like
+     "Nonstop … Playlist" must never count as a song */
+  const isSingle = (it) => {
+    if (!it.videoId || seenId.has(it.videoId)) return false;
+    const key = _bulkTitleKey(it.title);
+    if (key && seenKey.has(key)) return false;
+    const alt = altKey(it.title);
+    if (alt && seenAlt.has(alt)) return false;
+    const secs = _bulkDurSecs(it.duration);
+    if (secs && secs > 600) return false;
+    if (/\b(nonstop|non-stop|medley|playlist|compilation|greatest hits|collection|full album)\b/i
+        .test(it.title || "")) return false;
+    /* fan-junk that floods one-word artist names (Teeth, Hale…) */
+    if (/\b(amv|animatic|nightcore|sped up|slowed|bass boost|8d audio|fanmade|fan made|gacha)\b/i
+        .test(it.title || "")) return false;
+    if (mode === "normal" && /\binstrumental\b/i.test(it.title || ""))
+      return false;
+    return true;
+  };
+  const take = (it) => {
+    seenId.add(it.videoId);
+    const key = _bulkTitleKey(it.title);
+    if (key) seenKey.add(key);
+    const alt = altKey(it.title);
+    if (alt) seenAlt.add(alt);
+    picked.push(it);
+  };
+  const search = async (q) => {
+    try {
+      const r = await fetch("/api/search?q=" + encodeURIComponent(q));
+      const d = await r.json();
+      return d.items || [];
+    } catch (e) { return []; }
+  };
+  /* pass 1: the topic itself */
+  const topicPass = async () => {
+    for (const v of [topic, topic + " official audio", topic + " songs",
+                     topic + " live"]) {
+      if (picked.length >= count) break;
+      for (const it of await search(v + suffix))
+        if (picked.length < count && isSingle(it)) take(it);
+    }
+  };
+  /* artist by artist — one-artist searches return real singles
+     (14/15 for Eraserheads) where topic searches return compilations.
+     Round-robin so the setlist mixes artists. */
+  const artistPass = async (artists) => {
+    const pools = [];
+    for (const a of artists.slice(0, 12)) {
+      if (picked.length >= count) break;
+      const q = mode === "karaoke" ? a + suffix : a + " songs official audio";
+      const pool = (await search(q)).filter(it =>
+        isSingle(it) && _artistMatch(a, it));
+      if (pool.length) pools.push(pool);
+      const have = pools.reduce((n, p) => n + p.length, 0);
+      if (picked.length + have >= count && pools.length >= 5) break;
+    }
+    let round = 0, added = true;
+    while (picked.length < count && added) {
+      added = false;
+      for (const p of pools) {
+        if (picked.length >= count) break;
+        if (p[round] && isSingle(p[round])) { take(p[round]); added = true; }
+      }
+      round++;
+    }
+  };
+  /* roster topics (OPM…) fill from real artists FIRST — generic topic
+     searches are compilation/keyword-spam magnets and only top up */
+  const artists = _bulkArtists(topic);
+  if (artists.length) { await artistPass(artists); await topicPass(); }
+  else await topicPass();
+  if (!picked.length) {
+    note("Couldn't find any " + topic + " songs, master — try another genre or artist?");
+    return;
+  }
+  for (const it of picked) reserveVideo(it, null);
+  const names = picked.slice(0, 5).map(it => it.title).join("\n• ");
+  note("✓ Queued " + picked.length + " song" + (picked.length === 1 ? "" : "s") +
+       ", master! First up:\n• " + names +
+       (picked.length > 5 ? "\n…and " + (picked.length - 5) + " more 🎤" : ""));
+}
+/* v82: is this video actually BY the artist? Artist searches also
+   return other bands' songs that share the artist's name as a title
+   ("Teeth" the band vs "Teeth" by 5 Seconds of Summer, "The Dawn" vs
+   Tony Orlando's Dawn). Accept: the channel is the artist, the title's
+   first segment is/starts with the artist, "by <artist>", or — for
+   multi-word artists only — the last segment names them. */
+function _artistMatch(artist, it) {
+  const norm = (s) => (s || "").toLowerCase().normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const a = norm(artist).trim();
+  if (!a) return true;
+  const title = norm(it.title);
+  const ch = norm(it.channel);
+  if (ch && (ch === a || ch.includes(a))) return true;
+  const first = title.split(" - ")[0].trim();
+  if (first === a || first.startsWith(a + " ")) return true;
+  if (title.includes(" by " + a)) return true;
+  if (a.includes(" ")) {
+    const parts = title.split(" - ");
+    if (parts.length > 1) {
+      const last = parts[parts.length - 1]
+        .replace(/\([^)]*\)|\[[^\]]*\]/g, "").trim();
+      if (last === a || last.startsWith(a + " ")) return true;
+    }
+  }
+  return false;
+}
+/* v82: genre -> artist roster for bulk expansion. Era acts come first,
+   so a "90s/2000s" ask fills from them before newer artists top it up. */
+function _bulkArtists(topic) {
+  const low = (topic || "").toLowerCase();
+  if (/\b(opm|filipino|pinoy|tagalog)\b/.test(low))
+    return ["Eraserheads", "Rivermaya", "Parokya ni Edgar", "Teeth",
+            "The Dawn", "True Faith", "Introvoys", "APO Hiking Society",
+            "Hotdog", "Bamboo", "Kamikazee", "Hale", "Moonstar88",
+            "Itchyworms", "Sugarfree", "6cyclemind", "Cueshe", "Sandwich",
+            "Aegis", "MYMP", "Nina", "Jaya", "Regine Velasquez",
+            "Gary Valenciano", "Sarah Geronimo", "Moira Dela Torre",
+            "Ben&Ben", "IV of Spades", "Cup of Joe", "Zack Tabudlo"];
+  if (/\bk-?pop\b/.test(low))
+    return ["BTS", "BLACKPINK", "TWICE", "SEVENTEEN", "Stray Kids",
+            "NewJeans", "EXO", "Red Velvet", "IU", "BIGBANG", "PSY",
+            "Super Junior"];
+  return [];
+}
+function parseBulkQueue(clean) {
+  const s = clean.trim();
+  const low = s.toLowerCase();
+  /* a question about songs is chat, not an order */
+  if (/^(what|who|why|how|when|explain|tell me about)\b/.test(low)) return null;
+  const hasPlural = /\bsongs\b|\btracks\b/.test(low);
+  const hasSongWord = /\bsongs?\b|\btracks?\b/.test(low);
+  if (!hasSongWord) return null;
+  let count = null;
+  const m = s.match(/\b(\d{1,2})\s+(?:songs?|tracks?)\b/i)
+        || s.match(/^(\d{1,2})\b[^.!?]*\b(?:songs?|tracks?)\b/i)
+        || s.match(/^(?:queue|reserve|add|play|load|give me|get me|put)\s+(\d{1,2})\b(?![\d'’s])/i);
+  if (m) count = parseInt(m[1], 10);
+  /* no count + singular "song" = a single title ("queue love song") —
+     leave it to the single-song parser below */
+  if (count === null && !hasPlural) return null;
+  if (count === null) count = 10;
+  count = Math.max(1, Math.min(30, count));
+  let mode = null;
+  if (/\bnormal\b/i.test(s)) mode = "normal";
+  else if (/\bkaraoke\b/i.test(s)) mode = "karaoke";
+  let topic = s;
+  topic = topic.replace(/^(give|get)\s+me\b/i, " ");
+  topic = topic.replace(/^(queue|reserve|add|play|load|put)\b/i, " ");
+  topic = topic.replace(/\b\d{1,2}\s+(?:songs?|tracks?)\b/gi, " ");
+  topic = topic.replace(/^\s*\d{1,2}\b(?=\s)/, " ");
+  topic = topic.replace(/\b(?:songs?|tracks?)\b/gi, " ");
+  topic = topic.replace(/\bnormal\b/gi, " ");
+  topic = topic.replace(/\bkaraoke\b/gi, " ");
+  topic = topic.replace(/\bplease\b/gi, " ");
+  topic = topic.replace(/(\d{4})['’]e\b/g, "$1s");  /* "2000'e" typo -> 2000s */
+  topic = topic.replace(/\s+/g, " ").replace(/^[\s,]+|[\s,]+$/g, "").trim();
+  topic = topic.replace(/^(of|some|the)\s+/i, "").trim();
+  return { count, topic, mode: mode || searchMode() };
+}
 /* v64: commands she handles instantly herself — pattern-matched locally,
    never touching the flaky AI service. Returns true if handled. */
 function localCommand(raw) {
-  const t = raw.toLowerCase().trim().replace(/[!?.\s]+$/, "");
+  /* v82: "Tama, queue …" / "hey Tama play …" — strip her name first;
+     the old parser missed every command that started with it */
+  const clean = raw.replace(/^\s*(hey\s+|hi\s+)?tama\b[\s,:!-]*/i, "")
+                   .replace(/^\s*please\b[\s,]*/i, "").trim() || raw.trim();
+  const t = clean.toLowerCase().trim().replace(/[!?.\s]+$/, "");
   const say = (msg) => {
     chatAdd("tama", msg);
     chatHistory.push({ role: "assistant", content: msg });
@@ -1603,9 +1819,17 @@ function localCommand(raw) {
       (i === 0 ? "▶ " : (i + ". ")) + it.title);
     return say("🎶 Queue:\n" + lines.join("\n"));
   }
-  const pm = raw.match(/^play\s+(.+)$/i);
+  /* v82: bulk queue ("queue 20 opm songs") beats the single-song rules */
+  const bulk = parseBulkQueue(clean);
+  if (bulk) {
+    if (!bulk.topic)
+      return say("Songs of what, master? Give me a genre or artist — like “queue 20 OPM songs” 🎤");
+    chatQueueMany(bulk.topic, bulk.count, bulk.mode);
+    return true;
+  }
+  const pm = clean.match(/^play\s+(.+)$/i);
   if (pm && pm[1].trim().length > 1) return act(pm[1].trim(), "play");
-  const rm = raw.match(/^(reserve|queue|add)\s+(.+)$/i);
+  const rm = clean.match(/^(reserve|queue|add)\s+(.+)$/i);
   if (rm && rm[2].trim().length > 1) return act(rm[2].trim(), "reserve");
   return false;
 }
@@ -1640,7 +1864,7 @@ async function sendChat() {
       await new Promise(res => setTimeout(res, 1200));
   }
   typing.remove();
-  if (!reply) reply = "Brain freeze, master — say that again? 🎤";
+  if (!reply) reply = "My cloud brain hiccuped, master — but I can still run the app: try “queue 20 OPM songs”, “play <song>”, “skip” or “pause” 🎤";
   chatHistory.push({ role: "assistant", content: reply });
   saveChat();
   /* [[excel: name]] + [[sheet: name]] / ```csv blocks -> .xlsx download */
